@@ -1,0 +1,296 @@
+{
+  "id": "b1a2a7b4-b7ed-4bd1-8b56-ee5279fe8e34",
+  "prevId": "77841f56-10bc-4845-ac6e-e183d136969c",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.pending_polls": {
+      "name": "pending_polls",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "competitor_id": {
+          "name": "competitor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "poll_status",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "outcome_kind": {
+          "name": "outcome_kind",
+          "type": "poll_outcome_kind",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "http_status": {
+          "name": "http_status",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delivery_attempts": {
+          "name": "delivery_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_delivery_at": {
+          "name": "next_delivery_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "pending_polls_delivery_idx": {
+          "name": "pending_polls_delivery_idx",
+          "columns": [
+            {
+              "expression": "next_delivery_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"pending_polls\".\"status\" in ('success', 'error')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pending_polls_competitor_id_watchlist_id_fk": {
+          "name": "pending_polls_competitor_id_watchlist_id_fk",
+          "tableFrom": "pending_polls",
+          "tableTo": "watchlist",
+          "columnsFrom": [
+            "competitor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pending_polls_competitor_id_unique": {
+          "name": "pending_polls_competitor_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "competitor_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "pending_polls_attempt_range": {
+          "name": "pending_polls_attempt_range",
+          "value": "\"pending_polls\".\"attempt_no\" between 1 and 3"
+        },
+        "pending_polls_delivery_count": {
+          "name": "pending_polls_delivery_count",
+          "value": "\"pending_polls\".\"delivery_attempts\" >= 0"
+        },
+        "pending_polls_http_status": {
+          "name": "pending_polls_http_status",
+          "value": "\"pending_polls\".\"http_status\" between 100 and 599"
+        },
+        "pending_polls_lifecycle": {
+          "name": "pending_polls_lifecycle",
+          "value": "((\"pending_polls\".\"status\" = 'pending' and \"pending_polls\".\"outcome_kind\" is null and \"pending_polls\".\"finished_at\" is null and \"pending_polls\".\"next_delivery_at\" is null) or (\"pending_polls\".\"outcome_kind\" is not null and \"pending_polls\".\"finished_at\" is not null and \"pending_polls\".\"next_delivery_at\" is not null and ((\"pending_polls\".\"status\" = 'success' and \"pending_polls\".\"outcome_kind\" in ('complete', 'partial', 'missing')) or (\"pending_polls\".\"status\" = 'error' and \"pending_polls\".\"outcome_kind\" in ('rate_limited', 'upstream_error', 'timeout', 'transport_error', 'invalid_response', 'interrupted')))))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.source_state": {
+      "name": "source_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "smallint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "cooldown_until": {
+          "name": "cooldown_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "source_state_singleton": {
+          "name": "source_state_singleton",
+          "value": "\"source_state\".\"id\" = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.watchlist": {
+      "name": "watchlist",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "next_due_at": {
+          "name": "next_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_attempt_no": {
+          "name": "next_attempt_no",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "last_dispatched_poll_id": {
+          "name": "last_dispatched_poll_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "watchlist_due_idx": {
+          "name": "watchlist_due_idx",
+          "columns": [
+            {
+              "expression": "next_due_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"watchlist\".\"active\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "watchlist_active_due": {
+          "name": "watchlist_active_due",
+          "value": "\"watchlist\".\"next_due_at\" is not null = \"watchlist\".\"active\""
+        },
+        "watchlist_attempt_range": {
+          "name": "watchlist_attempt_range",
+          "value": "\"watchlist\".\"next_attempt_no\" between 1 and 3"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.poll_outcome_kind": {
+      "name": "poll_outcome_kind",
+      "schema": "public",
+      "values": [
+        "complete",
+        "partial",
+        "missing",
+        "rate_limited",
+        "upstream_error",
+        "timeout",
+        "transport_error",
+        "invalid_response",
+        "interrupted"
+      ]
+    },
+    "public.poll_status": {
+      "name": "poll_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "success",
+        "error"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
