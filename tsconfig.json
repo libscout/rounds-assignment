@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "baseUrl": "./",
+    "ignoreDeprecations": "6.0",
+    "incremental": false,
+    "skipLibCheck": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false,
+    "types": ["node", "jest"],
+    "paths": {
+      "@src": ["./src"],
+      "@src/*": ["./src/*"],
+      "@test/*": ["./test/*"]
+    }
+  },
+  "tsc-alias": {
+    "verbose": false,
+    "resolveFullPaths": true
+  },
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
+  }
+}
