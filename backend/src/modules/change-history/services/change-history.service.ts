@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { compareListing } from '../internal/listing-comparison';
 import { ListingChangeRepository } from '../repositories/listing-change.repository';
-import type { ListingDiff, Observation } from '../types';
+import type { ListingChange, ListingDiff, Observation } from '../types';
 
 /** Records meaningful listing changes and looks them up by poll, competitor, or time window. */
 @Injectable()
@@ -14,7 +14,7 @@ export class ChangeHistoryService {
     return diff;
   }
 
-  byPollIds(ids: string[]) {
+  byPollIds(ids: string[]): Promise<ListingChange[]> {
     return this.changes.byPollIds(ids);
   }
 

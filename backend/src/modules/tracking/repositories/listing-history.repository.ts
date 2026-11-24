@@ -3,12 +3,63 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DATABASE, type Database } from '@src/tools/db';
 import { listingVersions, pollAttempts } from '../entities';
 import { legacyListingSnapshots as archive } from '../entities/legacy-listing-snapshot.table';
-import { OutcomeKind } from '../types';
+import { OutcomeKind, type ListingFields, type PollObservation } from '../types';
 
-/** Looks up prior listing content and visibility and tracks which legacy changes have been imported. */
+/** Reads processed listing observations and comparison baselines and tracks legacy change imports. */
 @Injectable()
 export class ListingHistoryRepository {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  async findProcessed(
+    competitorId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<PollObservation[] | null> {
+    // Include the cursor row so a valid final page can be distinguished from an unknown cursor.
+    const rows = await this.selectObservations()
+      .where(
+        and(
+          eq(pollAttempts.competitorId, competitorId),
+          isNotNull(pollAttempts.processedAt),
+          cursor ? this.atOrBeforeCursor(competitorId, cursor) : undefined,
+        ),
+      )
+      .orderBy(
+        sql`${pollAttempts.finishedAt} desc nulls last`,
+        sql`${pollAttempts.id} desc nulls last`,
+      )
+      .limit(cursor ? limit + 1 : limit);
+
+    if (!cursor) return rows;
+    return rows.length ? rows.slice(1) : null;
+  }
+
+  private atOrBeforeCursor(competitorId: string, cursor: string) {
+    const { finishedAt, id, processedAt } = pollAttempts;
+    const position = this.db
+      .select({ finishedAt, id })
+      .from(pollAttempts)
+      .where(
+        and(eq(id, cursor), eq(pollAttempts.competitorId, competitorId), isNotNull(processedAt)),
+      );
+    return sql`(${finishedAt}, ${id}) <= ${position}`;
+  }
+
+  private selectObservations() {
+    const { id, finishedAt, outcomeKind, response, versionId } = pollAttempts;
+    return this.db
+      .select({
+        pollId: id,
+        finishedAt,
+        outcomeKind,
+        fields: sql<ListingFields | null>`case
+        when ${outcomeKind} = ${OutcomeKind.Complete} then ${listingVersions.fields}
+        when ${outcomeKind} = ${OutcomeKind.Partial} then ${response}
+      end`,
+      })
+      .from(pollAttempts)
+      .leftJoin(listingVersions, eq(listingVersions.id, versionId));
+  }
 
   async findBaseline(competitorId: string, before?: { time: Date; id: string }) {
     const prior = and(

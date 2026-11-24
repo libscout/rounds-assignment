@@ -16,7 +16,7 @@ Build **one NestJS business module, `TrackingModule`**, for the watchlist, dispa
 | `PollAttemptService` in `internal/` | The dispatcher, including during startup recovery | Decide **which ID to claim and what to persist**. Claiming creates a poll ID and advances the schedule in one transaction. Finishing saves the outcome and, when appropriate, schedules a retry or extends the persisted cooldown in one transaction. |
 | `SnapshotDeliveryWorker` in `internal/` | A second background loop | Deliver completed `pending_polls` rows to change history. Delete a row after acknowledgement. If delivery fails, schedule another delivery of the saved payload with the same poll ID. |
 
-Tracking owns three tables: `watchlist`, `pending_polls`, and `source_state`. The listing-source client performs one HTTP GET. Tracking’s `PollOutcomeMapper` classifies the response or transport failure. Tracking hands the saved outcome to change history with a stable poll ID and consumes its recent-changes lookup for the list view. The revised design assigns change events to change history and the timeline API to `CompetitorHistoryModule`. [Module design](./tracking-module.md)
+Tracking owns three tables: `watchlist`, `pending_polls`, and `source_state`. The listing-source client performs one HTTP GET. Tracking’s `PollOutcomeMapper` classifies the response or transport failure. Tracking hands the saved outcome to change history with a stable poll ID and consumes its recent-changes lookup for the list view. The revised design assigns change events to change history and the timeline API to `CompetitorTimelineModule`. [Module design](./tracking-module.md)
 
 ## Watchlist HTTP contract
 
@@ -28,7 +28,7 @@ Tracking owns three tables: `watchlist`, `pending_polls`, and `source_state`. Th
 | `GET /api/competitors` | No input DTO | `200` with an array of `TrackedCompetitorListItemDto` from `tracked-competitor-list-item.dto.ts`, e.g. `[{"id":"Acme","changedInLast24h":false}]`. An empty watchlist returns `[]`. The flag reflects a meaningful change observation within the past 24 hours, independently of summary availability. |
 | `DELETE /api/competitors/:id` | `CompetitorIdParamDto` in `competitor-id-param.dto.ts`, with `id: string` from the path | `204` with an empty body, including for an already inactive or unknown ID. |
 
-Apply a transforming Nest `ValidationPipe` to the controller. Both input DTOs trim string values and preserve case. Reject missing, blank, or non-string IDs with `400`; keep implicit type conversion disabled so a number cannot pass as a string. An unknown but valid ID is accepted without a source lookup. Return instances of the two response DTOs and mark their public fields with `@Expose()` for the existing `excludeAll` serializer. `CompetitorHistoryModule` owns the separate timeline endpoint. [Backend DTO conventions](../../backend/rules.md#controller-dtos--response-serialization)
+Apply a transforming Nest `ValidationPipe` to the controller. Both input DTOs trim string values and preserve case. Reject missing, blank, or non-string IDs with `400`; keep implicit type conversion disabled so a number cannot pass as a string. An unknown but valid ID is accepted without a source lookup. Return instances of the two response DTOs and mark their public fields with `@Expose()` for the existing `excludeAll` serializer. `CompetitorTimelineModule` owns the separate timeline endpoint. [Backend DTO conventions](../../backend/rules.md#controller-dtos--response-serialization)
 
 ## Follow one poll
 

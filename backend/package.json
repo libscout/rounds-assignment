@@ -14,7 +14,8 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs}/**/*.ts\" --fix",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --silent",
-    "docker:up": "docker compose up -d",
+    "test:e2e": "node --test test/e2e/competitors.test.mjs",
+    "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down",
     "migration:generate": "drizzle-kit generate",
     "migration:run": "drizzle-kit migrate"

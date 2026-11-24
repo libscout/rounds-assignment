@@ -13,11 +13,12 @@ import {
   PollDeliveryRepository,
   WatchlistRepository,
 } from './repositories';
-import { WatchlistService } from './services';
+import { PollObservationsService, WatchlistService } from './services';
 
 /** Connects the watchlist API to the workers that poll listings and deliver observations to change history. */
 @Module({
   imports: [ListingSourceModule, ChangeHistoryModule],
+  exports: [PollObservationsService],
   controllers: [CompetitorsController],
   providers: [
     ListingHistoryRepository,
@@ -25,6 +26,7 @@ import { WatchlistService } from './services';
     PollDeliveryRepository,
     WatchlistRepository,
     WatchlistService,
+    PollObservationsService,
     PollAttemptService,
     PollDispatcher,
     SnapshotDeliveryWorker,

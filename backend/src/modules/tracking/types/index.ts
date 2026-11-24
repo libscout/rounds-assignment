@@ -5,3 +5,4 @@ export type { PollReschedule } from './poll-reschedule.types';
 export type { ListingVersionWrite } from './listing-version-write.types';
 export type { PollResult } from './poll-result.types';
 export type { ListingFields } from './listing-fields.types';
+export type { PollObservation } from './poll-observation.types';

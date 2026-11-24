@@ -74,7 +74,11 @@ Run one backend instance per source. It schedules the oldest due competitor firs
 | --- | --- |
 | `POST /api/competitors` with `{"id":"acme-crm"}` | Adds or reactivates the ID and returns 201. |
 | `GET /api/competitors` | Active IDs with their `changedInLast24h` flags. |
-| `DELETE /api/competitors/:id` | Stops polling that ID and returns 204. Existing history stays available in storage. |
+| `DELETE /api/competitors/:id` | Stops polling that ID and returns 204. Its timeline remains available. |
+| `GET /api/competitors/:id/changes` | Newest-first array of recorded changes. Each page contains only changes from processed polls. |
+| `GET /api/competitors/:id/snapshots` | Newest-first array of processed polls with observed fields, changes, and summary states. |
+
+Use `?limit=50` (1–100, default 50). When the response includes `X-Next-Cursor`, pass that poll ID as `?cursor=<pollId>` to read the next page. A competitor with no processed polls returns `[]`. [Timeline contract](../docs/architecture/competitor-timeline.md)
 
 Tracking keeps every poll in `poll_attempts`, including failures and partial listings. Complete polls reference `listing_versions`. Change history compares the observation with the supplied baseline and stores one `listing_changes` event per meaningful content or availability change. The summary worker calls the in-process AI mock, which always returns an empty string. A change therefore keeps its field diff with a null summary and `invalid_output` status. The shared UTC budget permits 2,000 AI calls per day.
 
@@ -82,24 +86,14 @@ When upgrading an existing database, stop the previous backend before starting t
 
 # Local development
 
-From this directory, select the pinned Node version and install dependencies with npm.
+Follow the [root setup guide](../README.md#first-time-setup) to install dependencies and configure `.env`. From `backend/`, run:
 
-```bash
-nvm install
-npm ci
-cp .env.example .env
+```sh
 npm run docker:up
-npm run migration:run
 npm run start:dev
 ```
 
-Start the supplied listing source in another terminal from the backend directory. Set `LISTING_SOURCE_URL` to use another instance.
-
-```bash
-node ../assignment/files/listing-source/listing-source-server.mjs
-```
-
-The app uses the same committed SQL migrations at startup. PostgreSQL must be ready before starting it. Configure the PostgreSQL connection with the `DB_*` variables in `.env.example`. The tracking settings in that file set the source URL, poll interval, request timeout, and concurrency.
+Compose starts PostgreSQL and both supplied mock servers. Nest waits for its database connection and applies committed migrations on startup. Use `DB_*`, `LISTING_SOURCE_URL`, and the polling settings in `.env` to configure local connections and scheduling.
 
 ## Schema changes
 
@@ -120,3 +114,7 @@ npm test -- --runInBand
 ```
 
 The tests use Docker to provision an isolated PostgreSQL instance. The build copies migrations into `dist/tools/db/migrations/`. Run `npm run start:prod` from the backend directory after building.
+
+### End-to-end API test
+
+With Docker running, the pinned Node version active, and the assignment extracted, run `npm --prefix backend run test:e2e` from the repository root. The [test setup and full flow](./test/e2e/README.md) describe how the suite drives the supplied listing server over HTTP.

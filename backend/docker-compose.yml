@@ -6,9 +6,32 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_DATABASE}
     ports:
-      - '${DB_PORT}:5432'
+      - '127.0.0.1:${DB_PORT}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  listing-source:
+    image: node:26.13.1-bookworm-slim
+    working_dir: /source
+    command: ["node", "listing-source-server.mjs"]
+    volumes:
+      - ../assignment/files/listing-source:/source:ro
+    ports:
+      - '127.0.0.1:${SOURCE_PORT:-4002}:4002'
+
+  mock-llm:
+    image: python:3.13-alpine
+    working_dir: /mock
+    command: ["python", "-u", "mock-llm-server.py"]
+    volumes:
+      - ../assignment/files/mock-llm:/mock:ro
+    ports:
+      - '127.0.0.1:${MOCK_LLM_PORT:-4001}:4001'
 
 volumes:
   postgres-data:

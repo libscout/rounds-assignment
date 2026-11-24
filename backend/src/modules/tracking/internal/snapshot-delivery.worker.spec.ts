@@ -1,3 +1,7 @@
+import { ChangeFeedRepository } from '@src/modules/competitor-timeline/repositories/change-feed.repository';
+import { CompetitorTimelineService } from '@src/modules/competitor-timeline/services/competitor-timeline.service';
+import { SummaryStatus } from '@src/modules/change-history/types';
+import { PollObservationsService } from '../services';
 import { ListingChangeRepository } from '@src/modules/change-history/repositories/listing-change.repository';
 import { eq } from 'drizzle-orm';
 import { TestEnv } from '@test/nest';
@@ -22,6 +26,11 @@ describe('SnapshotDeliveryWorker', () => {
   it('preserves every attempt and replays a committed change after losing its acknowledgement', async () => {
     const db = env.nest.get<Database>(DATABASE),
       history = env.nest.get(ChangeHistoryService);
+    const timeline = new CompetitorTimelineService(
+      new PollObservationsService(new ListingHistoryRepository(db)),
+      history,
+      new ChangeFeedRepository(db),
+    );
     const worker = new SnapshotDeliveryWorker(
       new PollDeliveryRepository(db),
       history,
@@ -60,12 +69,36 @@ describe('SnapshotDeliveryWorker', () => {
     expect(
       await db.select().from(pollAttempts).where(eq(pollAttempts.id, changed.id)),
     ).toMatchObject([{ deliveryAttempts: 1, processedAt: null }]);
+    expect((await timeline.changePage('acme', 50)).snapshots).toEqual([]);
+    const beforeAck = await timeline.page('acme', 50);
+    expect(beforeAck.snapshots.map((row) => row.pollId)).not.toContain(changed.id);
     await db
       .update(pollAttempts)
       .set({ nextDeliveryAt: new Date(0) })
       .where(eq(pollAttempts.id, changed.id));
     expect(await worker.deliverBatch()).toBe(1);
     expect(delivery.mock.calls[1]).toEqual(delivery.mock.calls[0]);
+    const afterAck = await timeline.page('acme', 50);
+    expect((await timeline.changePage('acme', 50)).snapshots).toEqual([afterAck.snapshots[0]]);
+    expect(afterAck.snapshots).toMatchObject([
+      { pollId: changed.id, changed: true, summaryStatus: SummaryStatus.Pending },
+      { pollId: partial.id, changed: false, title: 'Draft', price: null },
+      { outcomeKind: OutcomeKind.Timeout, changed: false, title: null },
+      { outcomeKind: OutcomeKind.Complete, changed: false, price: '$39/mo' },
+      { outcomeKind: OutcomeKind.Complete, changed: false, price: '$39/mo' },
+    ]);
+    await db
+      .update(listingChanges)
+      .set({ summaryStatus: SummaryStatus.Ready, summary: 'Price fell.' })
+      .where(eq(listingChanges.pollId, changed.id));
+    const refreshed = await timeline.page('acme', 50);
+    expect(refreshed.snapshots.map((row) => row.pollId)).toEqual(
+      afterAck.snapshots.map((row) => row.pollId),
+    );
+    expect(refreshed.snapshots[0]).toMatchObject({
+      summaryStatus: SummaryStatus.Ready,
+      summary: 'Price fell.',
+    });
     const rows = await db.select().from(pollAttempts).orderBy(pollAttempts.finishedAt);
     expect(rows).toHaveLength(5);
     expect(rows.every((row) => row.processedAt && row.nextDeliveryAt === null)).toBe(true);

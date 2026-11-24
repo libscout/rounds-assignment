@@ -2,7 +2,7 @@
 
 The storage and delivery sections below describe the initial implementation. The agreed revision gives tracking a durable poll log and change history a changes feed. [Change history implementation plan](./change-history.md)
 
-Tracking owns the watchlist and its polling schedule. The agreed design uses one PostgreSQL watchlist and one active dispatcher in Docker Compose. All listing requests share the same rate limit and cooldown.
+Tracking owns the watchlist and its polling schedule. The agreed design uses one PostgreSQL watchlist and one active dispatcher in the backend. All listing requests share the same rate limit and cooldown.
 
 The [tracking database schema](./tracking-schema.md) defines the three tables, constraints, and transaction boundaries.
 
@@ -23,7 +23,7 @@ At 6,000 IDs every 900 seconds, demand is 6.67 requests per second. At the allow
 | Feature | Implementation |
 | --- | --- |
 | Durable watchlist and schedule | Store one PostgreSQL row per source ID with active status and `next_due_at`. Index active rows by `(next_due_at, id)` for deterministic selection. Add and reactivate atomically. A duplicate add leaves the existing schedule intact. |
-| Fair dispatch under overload | Run one dispatcher in the Compose deployment. Select the oldest eligible row when a request slot opens. After dispatch, schedule the next check from the actual start time plus the interval. Keep one due check per ID so restarts and missed intervals cannot create a backlog of historical requests. |
+| Fair dispatch under overload | Run one dispatcher per source. Select the oldest eligible row when a request slot opens. After dispatch, schedule the next check from the actual start time plus the interval. Keep one due check per ID so restarts and missed intervals cannot create a backlog of historical requests. |
 | Global request pacing | Route every listing request through one gate, including first polls and retries. At five per second, leave at least 200 ms between actual starts. After a delayed timer or cooldown, resume at the normal pace. The add endpoint enqueues the first check through this same path. |
 | Bounded concurrency and request deadlines | Configure a positive limit on outstanding HTTP requests and allow at most one per ID. Slow requests can overlap while all starts still go through the rate gate. Apply one deadline through body consumption, abort expired requests, and release the slot on every exit. Node’s `fetch` accepts an abort signal. [Node.js timeout signal](https://nodejs.org/api/globals.html#static-method-abortsignaltimeoutdelay) |
 | Shared cooldown and retry policy | When any ID returns `429`, record that attempt and suspend new starts for the entire source. Make the affected ID due at cooldown expiry. Resume with the oldest eligible ID across the watchlist. Keep the latest cooldown deadline if several responses arrive. The fixture sends seconds; HTTP also permits a date. Use a short positive fallback if the header is missing or invalid. For a 500, 502, 503, timeout, or transport error, allow up to two retries of that ID with exponential backoff and full jitter. Every attempt uses the shared limiter. [Source behavior](../../assignment/files/listing-source/README.md#endpoints) · [HTTP Retry-After](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3) |
@@ -55,6 +55,6 @@ Use a controllable clock and a recording HTTP adapter for timing assertions. Use
 
 ## Ownership
 
-The tracking controller handles the three watchlist routes. Public watchlist use cases live in `tracking/services/`, and polling coordination stays in `tracking/internal/`. The HTTP adapter in `external/listing-source/` handles the wire response. Tracking retains poll attempts. `ChangeHistoryModule` records meaningful changes. `CompetitorHistoryModule` combines both for the timeline endpoint. Change history owns the AI explanation on each diff and calls the summaries service for budgeted provider access.
+The tracking controller handles the three watchlist routes. Public watchlist use cases live in `tracking/services/`, and polling coordination stays in `tracking/internal/`. The HTTP adapter in `external/listing-source/` handles the wire response. Tracking retains poll attempts. `ChangeHistoryModule` records meaningful changes. `CompetitorTimelineModule` combines both for the timeline endpoint. Change history owns the AI explanation on each diff and calls the summaries service for budgeted provider access.
 
 For example, if a tracked ID returns `404` twice, tracking passes on both attempts and schedules another check. `ChangeHistoryModule` has the history needed to decide whether the first absence was a disappearance or the ID has always been missing.
