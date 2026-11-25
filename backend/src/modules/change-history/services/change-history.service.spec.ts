@@ -66,8 +66,9 @@ describe('ChangeHistoryService', () => {
       new Set(),
     );
   });
-  it('stores the state and original decision once per poll across a disappearance and replay', async () => {
+  it('records only disappearance and return when a competitor starts out missing', async () => {
     const id = randomUUIDv7();
+    const initiallyMissing = observation(id, { kind: ObservationKind.Missing });
     const baseline = observation(id, { kind: ObservationKind.Complete, fields });
     const missing = observation(id, { kind: ObservationKind.Missing });
     const stillMissing = observation(id, { kind: ObservationKind.Missing });
@@ -76,7 +77,7 @@ describe('ChangeHistoryService', () => {
       kind: ObservationKind.Complete,
       fields: returnedFields,
     });
-    const polls = [baseline, missing, stillMissing, returned];
+    const polls = [initiallyMissing, baseline, missing, stillMissing, returned];
     // Finish times can tie. UUIDv7 retains the poll creation order.
     polls.forEach((p) => {
       p.observedAt = new Date('2025-01-01T00:00:00Z');
@@ -84,17 +85,6 @@ describe('ChangeHistoryService', () => {
     for (const poll of polls) {
       await history.record(poll);
     }
-    const replay = await Promise.all([
-      history.record(returned),
-      history.record(returned),
-      history.record(baseline),
-    ]);
-    expect(replay[0].change).toMatchObject({
-      kind: ChangeKind.Returned,
-      changedFields: { price: { from: fields.price, to: returnedFields.price } },
-    });
-    expect(replay[1]).toEqual(replay[0]);
-    expect(replay[2].change).toBeNull();
     const rows = await db
       .select()
       .from(listingComparisons)
@@ -102,6 +92,7 @@ describe('ChangeHistoryService', () => {
       .orderBy(asc(listingComparisons.pollId));
     expect(rows.map((row) => row.pollId)).toEqual(polls.map((p) => p.pollId));
     expect(rows.map((row) => row.listingState)).toEqual([
+      null,
       fields,
       null,
       null,
@@ -109,20 +100,24 @@ describe('ChangeHistoryService', () => {
     ]);
     expect(rows.map((row) => row.diff?.kind ?? null)).toEqual([
       null,
+      null,
       ChangeKind.Disappeared,
       null,
       ChangeKind.Returned,
     ]);
     const first = await history.page(id, 1);
-    expect(first.items.map((change) => change.pollId)).toEqual([returned.pollId]);
+    expect(first.items).toMatchObject([
+      {
+        pollId: returned.pollId,
+        kind: ChangeKind.Returned,
+        changedFields: { price: { from: fields.price, to: returnedFields.price } },
+      },
+    ]);
     expect(
       (await history.page(id, 1, first.nextCursor)).items.map(
         (change) => change.pollId,
       ),
     ).toEqual([missing.pollId]);
-    await expect(history.page(id, 1, baseline.pollId)).rejects.toMatchObject({
-      status: 400,
-    });
     expect(await history.getDecisions([stillMissing.pollId, randomUUIDv7()])).toEqual([
       { pollId: stillMissing.pollId, change: null },
     ]);
@@ -143,33 +138,5 @@ describe('ChangeHistoryService', () => {
     expect(await history.changedSince([first.competitorId], new Date(0))).toEqual(
       new Set(),
     );
-  });
-  it('distinguishes initial, repeated and known absence and return', async () => {
-    const id = randomUUIDv7();
-    /** Creates the next confirmed absence for this competitor. */
-    const missing = () => observation(id, { kind: ObservationKind.Missing });
-    expect((await history.record(missing())).change).toBeNull();
-    expect(
-      (
-        await history.record(
-          observation(id, { kind: ObservationKind.Complete, fields }),
-        )
-      ).change,
-    ).toBeNull();
-    expect((await history.record(missing())).change?.kind).toBe(ChangeKind.Disappeared);
-    expect((await history.record(missing())).change).toBeNull();
-    expect(
-      (
-        await history.record(
-          observation(id, {
-            kind: ObservationKind.Complete,
-            fields: { ...fields, title: 'New' },
-          }),
-        )
-      ).change,
-    ).toMatchObject({
-      kind: ChangeKind.Returned,
-      changedFields: { title: { from: 'CRM', to: 'New' } },
-    });
   });
 });

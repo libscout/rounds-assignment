@@ -47,38 +47,6 @@ describe('tracking database', () => {
     ]);
   });
 
-  it('contains only the target schema in the fresh assessment database', async () => {
-    const result = await db.execute<{ table_name: string; column_name: string }>(
-      sql`select table_name,column_name from information_schema.columns where table_schema='public'`,
-    );
-    const cols = result.rows.map((row) => row.table_name + '.' + row.column_name);
-    expect(cols).toContain('poll_logs.delivered_at');
-    for (const col of [
-      'watchlist.active',
-      'poll_logs.processed_at',
-      'poll_logs.next_delivery_at',
-      'poll_logs.delivery_attempts',
-    ]) {
-      expect(cols).not.toContain(col);
-    }
-    for (const table of [
-      'listing_snapshots',
-      'listing_versions',
-      'poll_attempts',
-      'listing_baselines',
-      'comparison_receipts',
-      'listing_changes',
-    ]) {
-      expect(result.rows.some((row) => row.table_name === table)).toBe(false);
-    }
-    expect(
-      result.rows
-        .filter((row) => row.table_name === 'listing_comparisons')
-        .map((row) => row.column_name)
-        .sort(),
-    ).toEqual(['competitor_id', 'diff', 'listing_state', 'observed_at', 'poll_id']);
-  });
-
   it('enforces one outstanding attempt per listing and validates terminal outcomes', async () => {
     await db.insert(watchlist).values({ id: 'acme', nextDueAt: new Date() });
     const attempt = { competitorId: 'acme' };

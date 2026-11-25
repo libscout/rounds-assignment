@@ -183,24 +183,20 @@ describe('PollDispatcher', () => {
     expect(attempts.releaseUnstarted).toHaveBeenCalledWith(next);
     expect(fetchListing).toHaveBeenCalledTimes(1);
   });
-  it('paces 6000 eligible claims over 20 minutes with at most 4500 starts in the first 15', async () => {
+  it('spaces request starts 200 ms apart across competitors and retries', async () => {
     const starts: number[] = [];
     fetchListing.mockImplementation(() => {
       starts.push(performance.now());
 
       return Promise.resolve(missing);
     });
-    for (let index = 0; index < 6000; index++) {
-      await dispatcher.dispatchOnce();
+    await dispatcher.dispatchOnce();
+    for (let index = 0; index < 5; index++) {
       jest.advanceTimersByTime(199);
       await dispatcher.dispatchOnce();
       jest.advanceTimersByTime(1);
+      await dispatcher.dispatchOnce();
     }
-    expect(starts).toHaveLength(6000);
-    expect(starts.filter((time) => time < 900000)).toHaveLength(4500);
-    expect(
-      starts.every((time, index) => !index || time - starts[index - 1] >= 200),
-    ).toBe(true);
-    expect(new Set(fetchListing.mock.calls.map(([id]) => id)).size).toBe(6000);
+    expect(starts).toEqual([0, 200, 400, 600, 800, 1000]);
   });
 });

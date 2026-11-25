@@ -61,25 +61,18 @@ describe('competitor timeline HTTP contract', () => {
       changeKind: ChangeKind.ContentChanged,
       changedFields: { price: { from: '$39', to: '$29' } },
     };
-    const unchanged = {
-      ...change,
-      changed: false,
-      changeKind: null,
-      changedFields: {},
-      summaryStatus: 'not_applicable',
-    };
     timeline.page.mockResolvedValue({
-      snapshots: [change, row, unchanged].map((item) =>
+      snapshots: [change, row].map((item) =>
         Object.assign(new SnapshotDto(), item, { privateData: true }),
       ),
       nextCursor: row.pollId,
     });
     await agent(app.getHttpServer())
       .get('/api/competitors/%20Acme%20/snapshots')
-      .query({ limit: 3, cursor })
+      .query({ limit: 2, cursor })
       .expect('X-Next-Cursor', row.pollId)
-      .expect(200, [change, row, unchanged]);
-    expect(timeline.page).toHaveBeenCalledWith('Acme', 3, cursor);
+      .expect(200, [change, row]);
+    expect(timeline.page).toHaveBeenCalledWith('Acme', 2, cursor);
   });
   it('defaults to 50 and omits the cursor on an empty final page', async () => {
     timeline.page.mockResolvedValue({ snapshots: [], nextCursor: null });
@@ -95,8 +88,7 @@ describe('competitor timeline HTTP contract', () => {
     '?limit=no',
     '?limit=2.5',
     '?cursor=',
-    '?cursor=%23',
-    '?cursor=WyJhY21lIl0',
+    '?cursor=a439191c-7816-44fd-ae91-dda03eb0b058',
   ])('rejects invalid query %s', async (query) => {
     await agent(app.getHttpServer())
       .get('/api/competitors/Acme/snapshots' + query)

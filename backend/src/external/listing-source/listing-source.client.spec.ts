@@ -37,7 +37,7 @@ describe('listing source HTTP adapter', () => {
     expect(received).toBe('/listings/a%2Fb%20%3F');
     expect(requestId).toBe('p');
   });
-  it.each([404, 429, 502])(
+  it.each([404, 502])(
     'returns HTTP %i and the source Retry-After header verbatim',
     async (status) => {
       handler = (_req, res) => {

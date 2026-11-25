@@ -178,6 +178,7 @@ describe('AI summary queue', () => {
         .update(aiSummaries)
         .set({ availableAt: new Date(0) })
         .where(eq(aiSummaries.pollId, first.pollId));
+      const startedAt = Date.now();
       await worker.tick();
       await service.submit(first);
       await worker.tick();
@@ -185,7 +186,8 @@ describe('AI summary queue', () => {
         .select()
         .from(aiSummaries)
         .where(eq(aiSummaries.pollId, first.pollId));
-      expect(retry.availableAt.getTime()).toBeGreaterThan(Date.now() + 50000);
+      expect(retry.availableAt.getTime()).toBeGreaterThanOrEqual(startedAt + 60_000);
+      expect(retry.availableAt.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
       await db
         .update(aiSummaries)
         .set({ availableAt: new Date(0) })

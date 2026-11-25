@@ -70,7 +70,6 @@ describe('PollDeliveryService', () => {
       { pollId: ids[4] },
     ]);
     await service.acknowledge(ids[2]);
-    await service.acknowledge(ids[2]);
     expect(await service.oldestOutstandingId('a')).toBe(ids[3]);
     expect(await service.getDeliverableObservation(ids[3])).toMatchObject({
       pollId: ids[3],

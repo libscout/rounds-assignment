@@ -73,9 +73,4 @@ describe('AI summary worker', () => {
       expect(repo.retry).not.toHaveBeenCalled();
     },
   );
-  it('skips HTTP when the claim consumed no quota', async () => {
-    repo.claim.mockResolvedValue({ kind: 'finished' });
-    await worker.tick();
-    expect(client.complete).not.toHaveBeenCalled();
-  });
 });

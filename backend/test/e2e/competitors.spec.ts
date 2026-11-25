@@ -132,7 +132,6 @@ void test('public API tracks a listing through changes, source failures and remo
         p.outcomeKind === OutcomeKind.Complete &&
         p.failedAttempts.some((attempt) => attempt.kind === kind),
     );
-    assert.equal(recovered.pollId[14], '7');
     const failure = recovered.failedAttempts.find((a) => a.kind === kind);
     if (kind === OutcomeKind.Partial) {
       assert.ok(Object.keys(failure.fields).length > 0);
@@ -196,8 +195,11 @@ void test('public API tracks a listing through changes, source failures and remo
 
   const retained = await history();
   assert.ok(retained.every((row) => row.pollId[14] === '7'));
-  assert.equal(retained.filter((p) => p.changedFields.price).length, 1);
-  assert.ok(retained.some((p) => p.pollId === change.pollId));
+  const priceChanges = retained.filter((poll) => poll.changedFields.price);
+  assert.deepEqual(
+    priceChanges.map((poll) => poll.pollId),
+    [change.pollId],
+  );
   const ids = retained.map((p) => p.pollId);
   assert.equal(new Set(ids).size, ids.length);
   const times = retained.map((p) => Date.parse(p.fetchedAt));

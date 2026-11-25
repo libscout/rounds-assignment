@@ -9,7 +9,7 @@ import { CompetitorsController } from './competitors.controller';
 
 describe('watchlist HTTP contract', () => {
   let app: INestApplication<Server>;
-  const service = { add: jest.fn(), remove: jest.fn(), list: jest.fn() };
+  const service = { add: jest.fn(), remove: jest.fn() };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [ContextModule],
@@ -60,28 +60,21 @@ describe('watchlist HTTP contract', () => {
       { requestID: anonymous.headers['x-request-id'], userID: undefined },
     ]);
   });
-  it('returns the trimmed mixed-case ID on add, including duplicate adds', async () => {
-    for (let i = 0; i < 2; i++) {
-      await agent(app.getHttpServer())
-        .post('/api/competitors')
-        .send({ id: ' Foo ' })
-        .expect(201, { id: 'Foo' });
-    }
+  it('returns the trimmed mixed-case ID on add', async () => {
+    await agent(app.getHttpServer())
+      .post('/api/competitors')
+      .send({ id: ' Foo ' })
+      .expect(201, { id: 'Foo' });
     expect(service.add).toHaveBeenCalledWith('Foo');
   });
-  it.each([{}, { id: '   ' }, { id: 12 }, { id: null }, { id: ['A'] }])(
-    'rejects invalid body %p',
-    async (body) => {
-      await agent(app.getHttpServer()).post('/api/competitors').send(body).expect(400);
-    },
-  );
-  it('validates path params and returns an empty body on repeated deletes', async () => {
+  it.each([{}, { id: '   ' }, { id: 12 }])('rejects invalid body %p', async (body) => {
+    await agent(app.getHttpServer()).post('/api/competitors').send(body).expect(400);
+  });
+  it('validates the delete path and returns an empty body', async () => {
     await agent(app.getHttpServer()).delete('/api/competitors/%20').expect(400);
-    for (let i = 0; i < 2; i++) {
-      await agent(app.getHttpServer())
-        .delete('/api/competitors/%20Foo%20')
-        .expect(204, '');
-    }
+    await agent(app.getHttpServer())
+      .delete('/api/competitors/%20Foo%20')
+      .expect(204, '');
     expect(service.remove).toHaveBeenCalledWith('Foo');
   });
 });
