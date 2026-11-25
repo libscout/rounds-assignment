@@ -21,6 +21,7 @@ import {
 import { AiSummaryService } from './ai-summary.service';
 
 describe('AI summary queue', () => {
+  const liveProvider = { canSend: true, usesLiveProvider: true };
   let env: TestEnv;
   let db: Database;
   let repo: AiSummaryRepository;
@@ -33,6 +34,16 @@ describe('AI summary queue', () => {
       changedFields: { price: { from: '$39', to: '$29' } },
     },
   });
+  /** Creates a worker for the direct DeepSeek endpoint with the given key. */
+  function deepSeekWorker(apiKey?: string) {
+    const settings = Object.assign(new EnvSchema(), {
+      AI_BASE_URL: 'https://api.deepseek.com',
+      AI_API_KEY: apiKey,
+    });
+    const client = new AiChatClient(new ConfigService(settings));
+
+    return new AiSummaryWorker(repo, client, env.nest.get(LoggerService));
+  }
   beforeAll(async () => {
     env = await TestEnv.create({ providers: [AiSummaryRepository, AiSummaryService] });
     db = env.nest.get(DATABASE);
@@ -68,20 +79,23 @@ describe('AI summary queue', () => {
       SummarySubmissionOutcome.InvalidInput,
     );
     expect(await service.submit(input)).toBe(SummarySubmissionOutcome.Accepted);
-    expect(await repo.claim()).toMatchObject({ kind: 'claimed', pollId: input.pollId });
+    expect(await repo.claim(liveProvider)).toMatchObject({
+      kind: 'claimed',
+      pollId: input.pollId,
+    });
   });
 
   it('closes an expired final attempt without reserving another daily call', async () => {
     const input = request();
     await service.submit(input);
-    await repo.claim();
+    await repo.claim(liveProvider);
     await repo.retry(input.pollId, 1, new Date(0));
-    await repo.claim();
+    await repo.claim(liveProvider);
     await db
       .update(aiSummaries)
       .set({ availableAt: new Date(0) })
       .where(eq(aiSummaries.pollId, input.pollId));
-    expect(await repo.claim()).toEqual({ kind: 'finished' });
+    expect(await repo.claim(liveProvider)).toEqual({ kind: 'finished' });
     expect((await service.getResults([input.pollId])).get(input.pollId)).toEqual({
       status: 'failed',
     });
@@ -100,12 +114,12 @@ describe('AI summary queue', () => {
     expect((await service.getResults([input.pollId])).get(input.pollId)).toEqual({
       status: 'pending',
     });
-    const job = await repo.claim();
+    const job = await repo.claim(liveProvider);
     expect(job.kind).toBe('claimed');
     expect(await service.submit(input)).toBe(SummarySubmissionOutcome.Accepted);
     await repo.finish(input.pollId, 1, { status: S.Ready, text: 'Price fell.' });
     expect(await service.submit(input)).toBe(SummarySubmissionOutcome.Accepted);
-    expect(await repo.claim()).toEqual({ kind: 'idle' });
+    expect(await repo.claim(liveProvider)).toEqual({ kind: 'idle' });
     expect((await service.getResults([input.pollId])).get(input.pollId)).toEqual({
       status: 'ready',
       text: 'Price fell.',
@@ -128,16 +142,57 @@ describe('AI summary queue', () => {
     const b = request();
     await service.submit(a);
     await service.submit(b);
-    const claims = await Promise.all([repo.claim(), repo.claim()]);
+    const claims = await Promise.all([
+      repo.claim(liveProvider),
+      repo.claim(liveProvider),
+    ]);
     expect(claims.filter((c) => c.kind === 'finished')).toHaveLength(1);
     const won = claims.find((c) => c.kind === 'claimed');
     expect(won).toBeDefined();
     await repo.retry(won.pollId, 1, new Date(0));
-    expect(await repo.claim()).toEqual({ kind: 'finished' });
+    expect(await repo.claim(liveProvider)).toEqual({ kind: 'finished' });
     expect(
       [...(await service.getResults([a.pollId, b.pollId]))].map(([, r]) => r.status),
     ).toEqual(['budget_exhausted', 'budget_exhausted']);
     expect(await db.select().from(dailyAiUsage)).toMatchObject([{ calls: 2000 }]);
+  });
+  it('keeps the last quota slot available after a DeepSeek job fails locally for a missing key', async () => {
+    await db.insert(dailyAiUsage).values({
+      day: sql`(now() at time zone 'UTC')::date`,
+      calls: 1999,
+      liveCalls: 1999,
+    });
+    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue(
+      Response.json({
+        choices: [{ message: { content: 'Price dropped.' }, finish_reason: 'stop' }],
+      }),
+    );
+    try {
+      const first = request();
+      await service.submit(first);
+      await deepSeekWorker().tick();
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(await db.select().from(aiSummaries)).toMatchObject([
+        { pollId: first.pollId, status: S.Failed, attemptCount: 0 },
+      ]);
+      expect(await db.select().from(dailyAiUsage)).toMatchObject([
+        { calls: 1999, liveCalls: 1999 },
+      ]);
+
+      const next = request();
+      await service.submit(next);
+      await deepSeekWorker('test-only').tick();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect((await service.getResults([next.pollId])).get(next.pollId)).toEqual({
+        status: S.Ready,
+        text: 'Price dropped.',
+      });
+      expect(await db.select().from(dailyAiUsage)).toMatchObject([
+        { calls: 2000, liveCalls: 2000 },
+      ]);
+    } finally {
+      fetcher.mockRestore();
+    }
   });
   it('counts actual HTTP attempts, runs the next FIFO job during backoff and stops at the cap', async () => {
     const calls: string[] = [];
@@ -222,7 +277,10 @@ describe('AI summary queue', () => {
       .values({ day: sql`(now() at time zone 'UTC')::date - 1`, calls: 2000 });
     const input = request();
     await service.submit(input);
-    expect(await repo.claim()).toMatchObject({ pollId: input.pollId, attempt: 1 });
+    expect(await repo.claim(liveProvider)).toMatchObject({
+      pollId: input.pollId,
+      attempt: 1,
+    });
     expect(
       await db.select().from(dailyAiUsage).orderBy(dailyAiUsage.day),
     ).toMatchObject([{ calls: 2000 }, { calls: 1 }]);
@@ -236,13 +294,22 @@ describe('AI summary queue', () => {
       .update(aiSummaries)
       .set({ availableAt: new Date(0) })
       .where(eq(aiSummaries.pollId, a.pollId));
-    expect(await repo.claim()).toMatchObject({ pollId: a.pollId, attempt: 1 });
-    expect(await repo.claim()).toMatchObject({ pollId: b.pollId, attempt: 1 });
+    expect(await repo.claim(liveProvider)).toMatchObject({
+      pollId: a.pollId,
+      attempt: 1,
+    });
+    expect(await repo.claim(liveProvider)).toMatchObject({
+      pollId: b.pollId,
+      attempt: 1,
+    });
     await db
       .update(aiSummaries)
       .set({ availableAt: new Date(0) })
       .where(eq(aiSummaries.pollId, a.pollId));
-    expect(await repo.claim()).toMatchObject({ pollId: a.pollId, attempt: 2 });
+    expect(await repo.claim(liveProvider)).toMatchObject({
+      pollId: a.pollId,
+      attempt: 2,
+    });
     await repo.finish(a.pollId, 1, { status: S.Ready, text: 'stale' });
     expect((await service.getResults([a.pollId])).get(a.pollId)).toEqual({
       status: 'pending',

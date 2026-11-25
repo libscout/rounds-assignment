@@ -21,10 +21,24 @@ type SummaryStatus =
   | 'failed'
   | 'budget_exhausted';
 
+export interface FailedAttempt {
+  at: string;
+  kind: Exclude<Outcome, 'complete' | 'missing'>;
+  httpStatus?: number;
+}
+
+export interface ComparisonError {
+  pollId: string;
+  trackingFinishedAt: string;
+  status: 'error';
+}
+
 export interface Snapshot extends Record<Field, string | null> {
   pollId: string;
   fetchedAt: string;
   outcomeKind: Outcome;
+  failedAttempts: FailedAttempt[];
+  observationAvailable: boolean;
   comparisonStatus:
     'pending' | 'completed' | 'error' | 'unavailable' | 'not_applicable';
   changed: boolean;
@@ -35,6 +49,73 @@ export interface Snapshot extends Record<Field, string | null> {
 }
 
 export type HistoryView = 'changes' | 'polls';
+
+interface RequestedPoll {
+  pollId: string;
+  created: boolean;
+}
+
+/** Requests a poll and returns the queued or existing poll, or null for an untracked ID. */
+export async function requestPoll(
+  id: string,
+  signal: AbortSignal,
+): Promise<RequestedPoll | null> {
+  const response = await fetch(`${competitorUrl(id)}/polls`, {
+    method: 'POST',
+    signal,
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Poll request failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
+/** Reads the latest finished poll for a competitor, or undefined before the first check. */
+export async function loadLatestPoll(
+  id: string,
+  signal: AbortSignal,
+): Promise<Snapshot | undefined> {
+  const response = await request(`${competitorUrl(id)}/snapshots?limit=1`, { signal });
+  const rows: Snapshot[] = await response.json();
+
+  return rows.at(0);
+}
+
+/** Waits for the requested poll to reach the selected view, up to one minute. */
+export async function waitForPoll(
+  id: string,
+  pollId: string,
+  view: HistoryView,
+  signal: AbortSignal,
+) {
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
+  for (;;) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    deadline.throwIfAborted();
+    const latest = await loadLatestPoll(id, deadline);
+    if (latest && latest.pollId >= pollId) {
+      if (view === 'polls' || latest.comparisonStatus !== 'pending') {
+        return;
+      }
+    }
+  }
+}
+
+/** Reads the active comparison error for a competitor, including when its change feed is empty. */
+export async function loadLatestComparisonError(
+  id: string,
+  signal: AbortSignal,
+): Promise<ComparisonError | null> {
+  const response = await request(`${competitorUrl(id)}/status`, { signal });
+  const status: { latestComparisonError: ComparisonError | null } =
+    await response.json();
+
+  return status.latestComparisonError;
+}
 
 /** Fetches a page of changes or polls and reads the continuation cursor from the response. */
 export async function loadPage(

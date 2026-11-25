@@ -33,14 +33,19 @@ services:
       DB_DATABASE: ${DB_DATABASE:-competitor_pulse}
       LISTING_SOURCE_URL: ${LISTING_SOURCE_URL:-http://listing-source:4002}
       POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-900000}
-      DEEPSEEK_API_KEY:
+      POLL_TIMEOUT_MS: ${POLL_TIMEOUT_MS:-10000}
+      POLL_CONCURRENCY: ${POLL_CONCURRENCY:-8}
+      DEMO_RESET_ENABLED: ${DEMO_RESET_ENABLED:-true}
+      MOCK_SOURCE_TARGET: http://listing-source:4002
+      MOCK_LLM_TARGET: http://mock-llm:4001
+      AI_API_KEY:
       AI_BASE_URL:
       AI_MODEL:
     command:
       - sh
       - -ec
       - |
-        if [ -z "$$AI_BASE_URL" ] && [ -z "$$DEEPSEEK_API_KEY" ]; then
+        if [ -z "$$AI_BASE_URL" ] && [ -z "$$AI_API_KEY" ]; then
           export AI_BASE_URL=http://mock-llm:4001/v1
         fi
         exec node dist/main

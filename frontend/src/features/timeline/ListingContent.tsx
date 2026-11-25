@@ -6,8 +6,8 @@ import {
   summaryStatuses,
 } from './consts/timeline-labels.const';
 
-/** Shows the fields observed in a poll and identifies any missing values. */
-export function ListingDetails({ poll }: { poll: Snapshot }) {
+/** Shows the observed fields and identifies the values omitted by the source. */
+function ListingFields({ poll }: { poll: Snapshot }) {
   const missing = listingFields.filter((key) => poll[key] === null);
 
   return (
@@ -24,6 +24,32 @@ export function ListingDetails({ poll }: { poll: Snapshot }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** Shows the listing inline or on demand, and reports when tracking details could not be read. */
+export function ListingDetails({
+  poll,
+  expanded = false,
+}: {
+  poll: Snapshot;
+  expanded?: boolean;
+}) {
+  if (!poll.observationAvailable) {
+    return <p className="poll-note">Listing details unavailable.</p>;
+  }
+  if (poll.outcomeKind !== 'complete' && poll.outcomeKind !== 'partial') {
+    return null;
+  }
+  if (expanded) {
+    return <ListingFields poll={poll} />;
+  }
+
+  return (
+    <details>
+      <summary>View listing details</summary>
+      <ListingFields poll={poll} />
+    </details>
   );
 }
 
@@ -62,6 +88,9 @@ export function FieldChanges({ poll }: { poll: Snapshot }) {
 /** Shows summary status and the generated text when it is ready. */
 export function AiSummary({ poll }: { poll: Snapshot }) {
   const summary = summaryStatuses[poll.summaryStatus];
+  const awaitingComparison =
+    poll.comparisonStatus === 'pending' && poll.summaryStatus === 'pending';
+  const label = awaitingComparison ? 'Awaiting comparison' : summary.label;
 
   return (
     <div className="ai-summary">
@@ -71,7 +100,7 @@ export function AiSummary({ poll }: { poll: Snapshot }) {
           className="badge"
           data-tone={summary.tone}
         >
-          {summary.label}
+          {label}
         </span>
       </div>
       {poll.summaryStatus === 'ready' && poll.summary?.trim() && (

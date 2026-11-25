@@ -67,7 +67,10 @@ async function availablePort() {
 }
 
 /** Starts PostgreSQL, the mock services and the API, registering each for cleanup. */
-export async function startStack(resources: AsyncDisposableStack) {
+export async function startStack(
+  resources: AsyncDisposableStack,
+  pollIntervalMs = 450,
+) {
   const db = await new GenericContainer('postgres:18.4-alpine')
     .withEnvironment({ POSTGRES_PASSWORD: 'test' })
     .withExposedPorts(5432)
@@ -133,10 +136,13 @@ export async function startStack(resources: AsyncDisposableStack) {
         DB_PASSWORD: 'test',
         LISTING_SOURCE_URL: sourceUrl,
         AI_BASE_URL: llmUrl + '/v1',
-        DEEPSEEK_API_KEY: '',
+        AI_API_KEY: '',
         AI_MODEL: 'mock-llm',
+        DEMO_RESET_ENABLED: 'true',
+        MOCK_SOURCE_TARGET: sourceUrl,
+        MOCK_LLM_TARGET: llmUrl,
         ORCHESTRATOR_INTERVAL_MS: '100',
-        POLL_INTERVAL_MS: '450',
+        POLL_INTERVAL_MS: String(pollIntervalMs),
         POLL_TIMEOUT_MS: '700',
         POLL_CONCURRENCY: '1',
       },

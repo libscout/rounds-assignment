@@ -1,5 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNotNull, lte, notExists, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  sql,
+} from 'drizzle-orm';
 import { DATABASE, type Database, type DatabaseTransaction } from '@src/tools/db';
 import { watchlist, pollLogs, sourceState } from '../entities';
 import { MAX_POLL_OUTPUT_CODE_UNITS } from '../consts/polling.const';
@@ -31,11 +41,16 @@ export class PollAttemptRepository {
     return sql<number>`jsonb_array_length(${pollLogs.failedAttempts})`;
   }
 
+  /** Matches in-flight fetches using the partial index on unfinished polls. */
+  private static fetching() {
+    return and(isNull(pollLogs.finishedAt), eq(pollLogs.status, PollStatus.Fetching));
+  }
+
   /** Matches the fetching poll only if its recorded failures agree with the claimed attempt number. */
   private static activeAttempt(poll: PollAttempt) {
     return and(
       eq(pollLogs.pollId, poll.id),
-      eq(pollLogs.status, PollStatus.Fetching),
+      PollAttemptRepository.fetching(),
       eq(PollAttemptRepository.failureCount(), poll.attemptNo - 1),
     );
   }
@@ -49,7 +64,7 @@ export class PollAttemptRepository {
         attemptNo: sql<number>`${PollAttemptRepository.failureCount()} + 1`,
       })
       .from(pollLogs)
-      .where(eq(pollLogs.status, PollStatus.Fetching));
+      .where(PollAttemptRepository.fetching());
   }
 
   /** Reads the shared deadline for resuming requests to the listing source. */
@@ -72,6 +87,35 @@ export class PollAttemptRepository {
       .limit(1);
 
     return oldest?.due ?? null;
+  }
+
+  /** Queues a poll for an active competitor, or returns the ID already awaiting completion. */
+  requestPoll(competitorId: string) {
+    return this.db.transaction(async (tx) => {
+      const [listing] = await tx
+        .select({ id: watchlist.id })
+        .from(watchlist)
+        .where(and(eq(watchlist.id, competitorId), isNotNull(watchlist.nextDueAt)))
+        .for('update');
+      if (!listing) {
+        return;
+      }
+      const latest = await PollAttemptRepository.latestPoll(tx, competitorId);
+      if (latest?.finishedAt === null) {
+        return { pollId: latest.id, created: false };
+      }
+      const pollId = await PollAttemptRepository.insertPoll(
+        tx,
+        { competitorId, status: PollStatus.Queued },
+        latest?.id,
+      );
+      await tx
+        .update(watchlist)
+        .set({ nextDueAt: sql`least(${watchlist.nextDueAt}, now())` })
+        .where(eq(watchlist.id, competitorId));
+
+      return { pollId, created: true };
+    });
   }
 
   /** Locks the oldest eligible watchlist entry and starts a new poll or resumes its pending retry. */
@@ -101,10 +145,7 @@ export class PollAttemptRepository {
       .select({ id: pollLogs.pollId })
       .from(pollLogs)
       .where(
-        and(
-          eq(pollLogs.competitorId, watchlist.id),
-          eq(pollLogs.status, PollStatus.Fetching),
-        ),
+        and(eq(pollLogs.competitorId, watchlist.id), PollAttemptRepository.fetching()),
       );
     const [listing] = await tx
       .select({ id: watchlist.id, dueAt: watchlist.nextDueAt })
@@ -117,19 +158,30 @@ export class PollAttemptRepository {
     return listing;
   }
 
-  /** Resumes a waiting retry or creates the first attempt for the next poll. */
-  private static async startAttempt(tx: DatabaseTransaction, competitorId: string) {
+  /** Reads the newest poll while the caller holds the competitor's watchlist lock. */
+  private static async latestPoll(tx: DatabaseTransaction, competitorId: string) {
     const [latest] = await tx
       .select({
         id: pollLogs.pollId,
         status: pollLogs.status,
+        finishedAt: pollLogs.finishedAt,
         failures: PollAttemptRepository.failureCount(),
       })
       .from(pollLogs)
       .where(eq(pollLogs.competitorId, competitorId))
       .orderBy(desc(pollLogs.pollId))
       .limit(1);
-    if (latest?.status === PollStatus.WaitingRetry) {
+
+    return latest;
+  }
+
+  /** Starts a queued poll, resumes a retry, or creates a regularly scheduled poll. */
+  private static async startAttempt(tx: DatabaseTransaction, competitorId: string) {
+    const latest = await PollAttemptRepository.latestPoll(tx, competitorId);
+    if (
+      latest?.status === PollStatus.Queued ||
+      latest?.status === PollStatus.WaitingRetry
+    ) {
       await tx
         .update(pollLogs)
         .set({ status: PollStatus.Fetching })
@@ -137,7 +189,11 @@ export class PollAttemptRepository {
 
       return { id: latest.id, attemptNo: latest.failures + 1 };
     }
-    const id = await PollAttemptRepository.insertPoll(tx, competitorId, latest?.id);
+    const id = await PollAttemptRepository.insertPoll(
+      tx,
+      { competitorId, status: PollStatus.Fetching },
+      latest?.id,
+    );
 
     return { id, attemptNo: 1 };
   }
@@ -145,7 +201,7 @@ export class PollAttemptRepository {
   /** Creates a poll with a UUID greater than the competitor’s previous poll ID. */
   private static async insertPoll(
     tx: DatabaseTransaction,
-    competitorId: string,
+    input: { competitorId: string; status: PollStatus.Queued | PollStatus.Fetching },
     previousId?: string,
   ) {
     const pollId = previousId
@@ -156,7 +212,7 @@ export class PollAttemptRepository {
       : undefined;
     const [row] = await tx
       .insert(pollLogs)
-      .values({ competitorId, pollId })
+      .values({ ...input, pollId })
       .returning({ id: pollLogs.pollId });
 
     return row.id;
@@ -173,36 +229,59 @@ export class PollAttemptRepository {
     return owner?.lastDispatchedPollId === poll.id && owner.nextDueAt !== null;
   }
 
+  /** Drops queued work and closes a waiting retry when its competitor is removed. */
+  static async cancelPending(tx: DatabaseTransaction, competitorId: string) {
+    const openPoll = and(
+      eq(pollLogs.competitorId, competitorId),
+      isNull(pollLogs.finishedAt),
+    );
+    await tx
+      .delete(pollLogs)
+      .where(and(openPoll, eq(pollLogs.status, PollStatus.Queued)));
+    await tx
+      .update(pollLogs)
+      .set(PollAttemptRepository.cancelledRetryUpdate())
+      .where(and(openPoll, eq(pollLogs.status, PollStatus.WaitingRetry)));
+  }
+
+  /** Closes a retry at the time its last source request finished. */
+  private static cancelledRetryUpdate() {
+    return {
+      status: PollStatus.Failed,
+      finishedAt: sql<Date>`(${pollLogs.failedAttempts} -> -1 ->> 'at')::timestamptz`,
+    };
+  }
+
   /** Releases an unsent attempt, preserving prior failures and restoring its due time if still scheduled. */
   async releaseUnstarted(poll: ClaimedPoll) {
     await this.db.transaction(async (tx) => {
       const scheduled = await PollAttemptRepository.ownsSchedule(tx, poll);
       const released = await PollAttemptRepository.releaseClaim(tx, poll, scheduled);
       if (released && scheduled) {
-        const lastDispatchedPollId = poll.attemptNo === 1 ? null : poll.id;
         await tx
           .update(watchlist)
-          .set({ nextDueAt: poll.dueAt, lastDispatchedPollId })
+          .set({ nextDueAt: poll.dueAt })
           .where(eq(watchlist.id, poll.competitorId));
       }
     });
   }
 
-  /** Deletes an unsent first attempt or restores the retry state of an active claim. */
+  /** Requeues an unsent claim under its original ID or closes it when tracking stopped. */
   private static async releaseClaim(
     tx: DatabaseTransaction,
     poll: PollAttempt,
     scheduled: boolean,
   ) {
     const active = PollAttemptRepository.activeAttempt(poll);
-    if (poll.attemptNo === 1) {
+    if (!scheduled && poll.attemptNo === 1) {
       const deleted = await tx.delete(pollLogs).where(active);
 
       return deleted.rowCount === 1;
     }
+    const pending = poll.attemptNo === 1 ? PollStatus.Queued : PollStatus.WaitingRetry;
     const update = scheduled
-      ? { status: PollStatus.WaitingRetry }
-      : { status: PollStatus.Failed, finishedAt: new Date() };
+      ? { status: pending }
+      : PollAttemptRepository.cancelledRetryUpdate();
     const updated = await tx.update(pollLogs).set(update).where(active);
 
     return updated.rowCount === 1;

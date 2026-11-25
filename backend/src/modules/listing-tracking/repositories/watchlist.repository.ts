@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, isNotNull } from 'drizzle-orm';
+import { eq, isNull, isNotNull } from 'drizzle-orm';
 import { DATABASE, type Database } from '@src/tools/db';
-import { PollStatus } from '../types';
-import { pollLogs, watchlist } from '../entities';
+import { watchlist } from '../entities';
+import { PollAttemptRepository } from './poll-attempt.repository';
 
 /** Stores which competitors are active and schedules them when tracking starts. */
 @Injectable()
@@ -22,22 +22,14 @@ export class WatchlistRepository {
       });
   }
 
-  /** Clears the competitor’s schedule and closes any poll waiting for a retry. */
+  /** Removes unsent work and closes waiting retries when a competitor is untracked. */
   async deactivate(id: string): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
         .update(watchlist)
         .set({ nextDueAt: null, lastDispatchedPollId: null })
         .where(eq(watchlist.id, id));
-      await tx
-        .update(pollLogs)
-        .set({ status: PollStatus.Failed, finishedAt: new Date() })
-        .where(
-          and(
-            eq(pollLogs.competitorId, id),
-            eq(pollLogs.status, PollStatus.WaitingRetry),
-          ),
-        );
+      await PollAttemptRepository.cancelPending(tx, id);
     });
   }
 

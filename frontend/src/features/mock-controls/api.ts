@@ -20,3 +20,12 @@ export async function nextVersion(id: string): Promise<Version | null> {
 
   return versions[id];
 }
+
+/** Waits for the application's reset of its saved progress and both local mocks. */
+export async function resetDemo() {
+  const response = await fetch('/api/dev/progress', { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.message ?? 'Could not confirm the reset. Try again.');
+  }
+}

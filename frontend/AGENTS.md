@@ -7,6 +7,7 @@ Work from `frontend/`. Use the Node version in `.nvmrc` and npm with the committ
 - Keep components pure. Call Hooks at the top level of function components or custom Hooks. Keep Strict Mode enabled. [Rules of React](https://react.dev/reference/rules)
 - Keep state close to the components that own it. Compute display values from props and state during render. Handle user actions in event handlers and use Effects for synchronization with external systems. [Choosing state structure](https://react.dev/learn/choosing-the-state-structure) · [When to use an Effect](https://react.dev/learn/you-might-not-need-an-effect)
 - Split components and functions by responsibility. For these two views, keep feature-specific UI and data access together. Extract shared code when both views need it.
+- Give named standalone functions a short JSDoc description. A constant used in only one file can stay there. Put shared feature constants in the owning feature’s `consts/` folder and constants shared across features in `src/consts/`.
 - Use native links for navigation, buttons for actions, and visible labels for form controls. Loading, empty, and failed requests need distinct UI states. [W3C forms guidance](https://www.w3.org/WAI/tutorials/forms/labels/)
 
 ## CompetitorPulse API

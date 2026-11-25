@@ -44,6 +44,70 @@ describe('PollAttemptService', () => {
     }
     expect(await attempts.claim()).toBeUndefined();
   });
+  it('creates one manual poll across concurrent requests and dispatches that ID', async () => {
+    await db
+      .insert(watchlist)
+      .values({ id: 'acme', nextDueAt: new Date(Date.now() + 900_000) });
+    const requests = await Promise.all(
+      Array.from({ length: 8 }, () => attempts.requestPoll('acme')),
+    );
+    const pollId = requests[0].pollId;
+    expect(requests.filter((r) => r.created)).toHaveLength(1);
+    expect(new Set(requests.map((r) => r.pollId))).toEqual(new Set([pollId]));
+    expect(await db.select().from(pollLogs)).toMatchObject([
+      { pollId, status: PollStatus.Queued },
+    ]);
+    await expect(
+      db.insert(pollLogs).values({ competitorId: 'acme' }),
+    ).rejects.toMatchObject({
+      cause: { code: '23505' },
+    });
+    const poll = await attempts.claim();
+    expect(poll.id).toBe(pollId);
+    expect(await attempts.requestPoll('acme')).toEqual({ pollId, created: false });
+    await attempts.releaseUnstarted(poll);
+    const resumed = await attempts.claim();
+    expect(resumed.id).toBe(pollId);
+    await attempts.finish(
+      resumed,
+      { kind: OutcomeKind.Missing, httpStatus: 404 },
+      new Date(),
+    );
+    const next = await attempts.requestPoll('acme');
+    expect(next.created).toBe(true);
+    expect(next.pollId > pollId).toBe(true);
+  });
+  it('shares a scheduled poll and preserves its retry deadline on a manual request', async () => {
+    await tracked.add('acme');
+    const [poll, requested] = await Promise.all([
+      attempts.claim(),
+      attempts.requestPoll('acme'),
+    ]);
+    const running = poll ?? (await attempts.claim());
+    expect(running.id).toBe(requested.pollId);
+    const deadline = new Date(Date.now() + 60_000);
+    await attempts.finish(
+      running,
+      { kind: OutcomeKind.RateLimited, httpStatus: 429, retryAfter: deadline },
+      new Date(),
+    );
+    expect(await attempts.requestPoll('acme')).toEqual({
+      pollId: running.id,
+      created: false,
+    });
+    const [schedule] = await db.select().from(watchlist);
+    expect(schedule.nextDueAt).toEqual(deadline);
+    expect(await attempts.claim()).toBeUndefined();
+  });
+  it('cancels an unsent poll on removal and only accepts active competitors', async () => {
+    expect(await attempts.requestPoll('acme')).toBeUndefined();
+    await tracked.add('acme');
+    await attempts.requestPoll('acme');
+    await tracked.remove('acme');
+    expect(await attempts.requestPoll('acme')).toBeUndefined();
+    expect(await attempts.claim()).toBeUndefined();
+    expect(await db.select().from(pollLogs)).toEqual([]);
+  });
   it('schedules two jittered retries on one poll ID then returns to the normal interval', async () => {
     await tracked.add('acme');
     const ids = new Set<string>();
@@ -210,10 +274,11 @@ describe('PollAttemptService', () => {
   it('closes a waiting poll on removal and creates a newer UUIDv7 after reactivation even with a future prior ID', async () => {
     await tracked.add('acme');
     const first = await attempts.claim();
-    await attempts.finish(first, { kind: OutcomeKind.Timeout }, new Date());
+    const failedAt = new Date(Date.now() - 600_000);
+    await attempts.finish(first, { kind: OutcomeKind.Timeout }, failedAt);
     await tracked.remove('acme');
     const [closed] = await db.select().from(pollLogs);
-    expect(closed.status).toBe(PollStatus.Failed);
+    expect(closed).toMatchObject({ status: PollStatus.Failed, finishedAt: failedAt });
     const future = 'f0000000-0000-7001-8000-000000000001';
     await db
       .update(pollLogs)
@@ -224,6 +289,35 @@ describe('PollAttemptService', () => {
     expect(next.id > future).toBe(true);
     expect(next.id[14]).toBe('7');
     expect(next.attemptNo).toBe(1);
+  });
+  it('keeps the last fetch time when an unsent retry is released after removal', async () => {
+    await tracked.add('acme');
+    const first = await attempts.claim();
+    await attempts.finish(
+      first,
+      { kind: OutcomeKind.Timeout },
+      new Date(Date.now() - 600_000),
+    );
+    const second = await attempts.claim();
+    const failedAt = new Date(Date.now() - 300_000);
+    await attempts.finish(
+      second,
+      { kind: OutcomeKind.UpstreamError, httpStatus: 503 },
+      failedAt,
+    );
+    const retry = await attempts.claim();
+    await tracked.remove('acme');
+    await attempts.releaseUnstarted(retry);
+    const [closed] = await db.select().from(pollLogs);
+    expect(closed).toMatchObject({
+      pollId: first.id,
+      status: PollStatus.Failed,
+      finishedAt: failedAt,
+      failedAttempts: [
+        { kind: OutcomeKind.Timeout },
+        { kind: OutcomeKind.UpstreamError },
+      ],
+    });
   });
   it('records an old response without changing a reactivated schedule', async () => {
     await tracked.add('acme');

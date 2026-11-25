@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@src/tools/config';
 import { ContextModule } from '@src/tools/context';
 import { DbModule } from '@src/tools/db';
+import { DemoResetModule } from '@src/tools/demo-reset/demo-reset.module';
 import { LoggerModule } from '@src/tools/logger';
 
 /** Connects competitor tracking to configuration, PostgreSQL, request context, and logging. */
@@ -11,6 +12,7 @@ import { LoggerModule } from '@src/tools/logger';
   imports: [
     ConfigModule.register(),
     DbModule,
+    DemoResetModule,
     ListingTrackingModule,
     CompetitorTimelineModule,
     ContextModule,

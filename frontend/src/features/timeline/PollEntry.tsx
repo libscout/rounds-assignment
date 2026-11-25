@@ -1,5 +1,7 @@
 import type { Snapshot } from './api';
 import { AiSummary, FieldChanges, ListingDetails } from './ListingContent';
+import FailedAttempts from './FailedAttempts';
+import { comparisonMessages } from './consts/timeline-labels.const';
 import { pollStatus } from './presentation';
 import { clock } from './consts/date-formats.const';
 
@@ -12,8 +14,8 @@ export default function PollEntry({
   latest: boolean;
 }) {
   const status = pollStatus(poll);
-  const hasListing = poll.outcomeKind === 'complete' || poll.outcomeKind === 'partial';
-
+  const comparison = poll.changed ? null : comparisonMessages[poll.comparisonStatus];
+  const comparisonTone = poll.comparisonStatus === 'pending' ? 'blue' : undefined;
   const expanded = latest || poll.outcomeKind === 'partial';
 
   return (
@@ -27,14 +29,20 @@ export default function PollEntry({
           <h4>{status.title}</h4>
           <span className="badge">{status.badge}</span>
         </div>
-        <FieldChanges poll={poll} />
-        {hasListing && expanded && <ListingDetails poll={poll} />}
-        {hasListing && !expanded && (
-          <details>
-            <summary>Listing details</summary>
-            <ListingDetails poll={poll} />
-          </details>
+        {comparison && (
+          <p
+            className="poll-note"
+            data-tone={comparisonTone}
+          >
+            {comparison}
+          </p>
         )}
+        <FieldChanges poll={poll} />
+        <ListingDetails
+          poll={poll}
+          expanded={expanded}
+        />
+        <FailedAttempts attempts={poll.failedAttempts} />
         <AiSummary poll={poll} />
       </article>
     </li>

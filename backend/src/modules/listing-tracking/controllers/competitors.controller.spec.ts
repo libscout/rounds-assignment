@@ -6,15 +6,20 @@ import type { Server } from 'node:http';
 import { ContextModule, ContextService } from '@src/tools/context';
 import { WatchlistService } from '../services';
 import { CompetitorsController } from './competitors.controller';
+import { PollAttemptService } from '../internal/poll-attempt.service';
 
 describe('watchlist HTTP contract', () => {
   let app: INestApplication<Server>;
   const service = { add: jest.fn(), remove: jest.fn() };
+  const polls = { requestPoll: jest.fn() };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [ContextModule],
       controllers: [CompetitorsController],
-      providers: [{ provide: WatchlistService, useValue: service }],
+      providers: [
+        { provide: WatchlistService, useValue: service },
+        { provide: PollAttemptService, useValue: polls },
+      ],
     }).compile();
     app = module.createNestApplication();
     app.useGlobalInterceptors(
@@ -76,5 +81,17 @@ describe('watchlist HTTP contract', () => {
       .delete('/api/competitors/%20Foo%20')
       .expect(204, '');
     expect(service.remove).toHaveBeenCalledWith('Foo');
+  });
+  it('returns HTTP 202 with the existing poll ID when a poll is already in progress', async () => {
+    const result = { pollId: '019a0000-0000-7000-8000-000000000001', created: false };
+    polls.requestPoll.mockResolvedValueOnce(result);
+    await agent(app.getHttpServer())
+      .post('/api/competitors/%20Acme%20/polls')
+      .expect(202, result);
+    expect(polls.requestPoll).toHaveBeenCalledWith('Acme');
+  });
+  it('rejects invalid poll paths and reports an untracked competitor', async () => {
+    await agent(app.getHttpServer()).post('/api/competitors/%20/polls').expect(400);
+    await agent(app.getHttpServer()).post('/api/competitors/missing/polls').expect(404);
   });
 });

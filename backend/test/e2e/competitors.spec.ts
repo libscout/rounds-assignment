@@ -9,8 +9,102 @@ import { ChangeKind } from '@src/modules/change-history/types';
 import { SummaryStatus } from '@src/modules/ai-summary/types';
 import { OutcomeKind } from '@src/modules/listing-tracking/types';
 import { eventually, request, startStack } from './stack';
+import type { RequestedPollDto } from '@src/modules/listing-tracking/dto';
 
 const id = 'ferry-pay';
+
+interface MockSourceStats {
+  requests: number;
+  byCompetitor: Record<string, { requests: number }>;
+  byStatus: Record<string, number>;
+  versions: Record<string, { index: number }>;
+  settings: { versionIntervalSeconds: number };
+}
+
+/** Reads the supplied listing server's counters and fixture versions. */
+async function readSourceStats(sourceUrl: string): Promise<MockSourceStats> {
+  return (
+    await request(sourceUrl + '/control/stats')
+  ).json() as Promise<MockSourceStats>;
+}
+
+void test('manual polls and a complete reset of a running demo', async () => {
+  await using resources = new AsyncDisposableStack();
+  const { api, sourceUrl, llmUrl } = await startStack(resources, 900_000);
+  const competitor = 'acme-crm';
+  const listing = `${api}/${competitor}`;
+  const settings = {
+    versionIntervalSeconds: 0,
+    latencyMinMs: 350,
+    latencyMaxMs: 350,
+    slowRate: 0,
+    errorRate: 0,
+    timeoutRate: 0,
+    partialRate: 0,
+  };
+  /** Applies deterministic source settings and starts tracking the test competitor. */
+  async function track() {
+    await request(sourceUrl + '/control/configure', { method: 'POST', body: settings });
+    await request(api, { method: 'POST', body: { id: competitor }, status: 201 });
+  }
+  /** Reads the finished observations for the test competitor. */
+  async function history(): Promise<SnapshotDto[]> {
+    return (await request(listing + '/snapshots')).json() as Promise<SnapshotDto[]>;
+  }
+  /** Requests a manual poll over the same endpoint as the timeline button. */
+  async function poll(): Promise<RequestedPollDto> {
+    return (
+      await request(listing + '/polls', { method: 'POST', status: 202 })
+    ).json() as Promise<RequestedPollDto>;
+  }
+  await track();
+  const baseline = await eventually('first baseline', async () =>
+    (await history()).find((row) => row.comparisonStatus === 'completed'),
+  );
+  await request(sourceUrl + '/control/advance', {
+    method: 'POST',
+    body: { id: competitor, steps: 2 },
+  });
+  const requests = await Promise.all([poll(), poll()]);
+  assert.equal(requests.filter((r) => r.created).length, 1);
+  assert.equal(new Set(requests.map((r) => r.pollId)).size, 1);
+  assert.notEqual(requests[0].pollId, baseline.pollId);
+  const change = await eventually('manual price change and summary', async () =>
+    (await history()).find(
+      (r) => r.pollId === requests[0].pollId && r.summaryStatus === SummaryStatus.Ready,
+    ),
+  );
+  assert.match(change.changedFields.price.to, /29/);
+  await poll();
+  await eventually('manual fetch is in flight', async () => {
+    const stats = await readSourceStats(sourceUrl);
+
+    return stats.byCompetitor[competitor].requests === 2 && stats.requests === 3;
+  });
+  await request(new URL('/api/dev/progress', api).href, {
+    method: 'DELETE',
+    status: 204,
+  });
+  assert.deepEqual(await (await request(api)).json(), []);
+  assert.deepEqual(await history(), []);
+  assert.deepEqual(await (await request(listing + '/changes')).json(), []);
+  const source = await readSourceStats(sourceUrl);
+  assert.equal(source.requests, 0);
+  assert.equal(source.versions[competitor].index, 0);
+  assert.equal(source.settings.versionIntervalSeconds, 120);
+  const llm = (await (await request(llmUrl + '/control/stats')).json()) as {
+    callCount: number;
+  };
+  assert.equal(llm.callCount, 0);
+  await request(listing + '/polls', { method: 'POST', status: 404 });
+  await track();
+  const fresh = await eventually('worker resumes with a fresh baseline', async () =>
+    (await history()).find((r) => r.comparisonStatus === 'completed'),
+  );
+  assert.match(fresh.price, /39/);
+  assert.equal(fresh.changed, false);
+  assert.notEqual(fresh.pollId, baseline.pollId);
+});
 
 void test('public API tracks a listing through changes, source failures and removal', async () => {
   await using resources = new AsyncDisposableStack();
@@ -29,11 +123,7 @@ void test('public API tracks a listing through changes, source failures and remo
   const advance = (steps = 1) =>
     request(sourceUrl + '/control/advance', { method: 'POST', body: { id, steps } });
   /** Reads request counts and response status totals from the mock source. */
-  const sourceStats = async () =>
-    (await request(sourceUrl + '/control/stats')).json() as Promise<{
-      byCompetitor: Record<string, { requests: number }>;
-      byStatus: Record<string, number>;
-    }>;
+  const sourceStats = () => readSourceStats(sourceUrl);
   /** Returns the number of source requests observed for the test competitor. */
   const requestCount = async () =>
     (await sourceStats()).byCompetitor[id]?.requests ?? 0;

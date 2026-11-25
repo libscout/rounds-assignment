@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { addCompetitor, listCompetitors, removeCompetitor } from './api';
 import type { Competitor } from './api';
 import { demoCompetitorIds } from './consts/demo-competitors.const';
+import ResetAll from '../mock-controls/ResetAll';
 
 /** Lists tracked competitors and provides controls for adding and removing them. */
 export default function Watchlist() {
@@ -39,6 +40,14 @@ export default function Watchlist() {
   function reload() {
     setReadStatus('loading');
     setRevision((value) => value + 1);
+  }
+
+  /** Clears the old watchlist and reloads membership after a confirmed demo reset. */
+  function onReset() {
+    setInput('');
+    setItems([]);
+    setMessage('');
+    reload();
   }
 
   /** Applies a watchlist change, reports its outcome and refreshes membership on success. */
@@ -125,6 +134,14 @@ export default function Watchlist() {
                   {changedInLast24h && (
                     <span className="change-flag">Changed in the last 24 hours</span>
                   )}
+                  {changedInLast24h === null && (
+                    <span
+                      className="badge"
+                      data-tone="neutral"
+                    >
+                      Recent activity unavailable
+                    </span>
+                  )}
                 </div>
                 <button
                   aria-label={`Remove ${id}`}
@@ -138,6 +155,13 @@ export default function Watchlist() {
           </ul>
         )}
       </section>
+      {import.meta.env.DEV && (
+        <ResetAll
+          busy={saving}
+          setBusy={setSaving}
+          onReset={onReset}
+        />
+      )}
     </main>
   );
 }

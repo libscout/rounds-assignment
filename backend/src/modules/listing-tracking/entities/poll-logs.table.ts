@@ -55,7 +55,11 @@ export const pollLogs = pgTable(
     finishedAt,
     deliveredAt,
   }) => {
-    const open = inArray(status, [PollStatus.Fetching, PollStatus.WaitingRetry]);
+    const open = inArray(status, [
+      PollStatus.Queued,
+      PollStatus.Fetching,
+      PollStatus.WaitingRetry,
+    ]);
     const deliverable = inArray(status, [PollStatus.Complete, PollStatus.Missing]);
     const validFinishedAt = or(
       and(open, isNull(finishedAt)),
@@ -71,6 +75,7 @@ export const pollLogs = pgTable(
     const validFailures = and(
       eq(sql<string>`jsonb_typeof(${failedAttempts})`, 'array'),
       between(failureCount, 0, MAX_POLL_ATTEMPTS),
+      or(ne(status, PollStatus.Queued), eq(failureCount, 0)),
       or(
         notInArray(status, [PollStatus.Failed, PollStatus.WaitingRetry]),
         gt(failureCount, 0),
@@ -79,7 +84,7 @@ export const pollLogs = pgTable(
     );
 
     return [
-      uniqueIndex('poll_logs_open_idx').on(competitorId).where(open.inlineParams()),
+      uniqueIndex('poll_logs_open_idx').on(competitorId).where(isNull(finishedAt)),
       index('poll_logs_competitor_order_idx').on(competitorId, pollId.desc()),
       index('poll_logs_timeline_idx')
         .on(competitorId, finishedAt.desc(), pollId.desc())

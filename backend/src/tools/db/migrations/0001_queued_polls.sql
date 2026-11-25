@@ -1,0 +1,8 @@
+ALTER TABLE "poll_logs" DROP CONSTRAINT "poll_logs_status";--> statement-breakpoint
+ALTER TABLE "poll_logs" DROP CONSTRAINT "poll_logs_lifecycle";--> statement-breakpoint
+ALTER TABLE "poll_logs" DROP CONSTRAINT "poll_logs_failures";--> statement-breakpoint
+DROP INDEX "poll_logs_open_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "poll_logs_open_idx" ON "poll_logs" USING btree ("competitor_id") WHERE "poll_logs"."finished_at" is null;--> statement-breakpoint
+ALTER TABLE "poll_logs" ADD CONSTRAINT "poll_logs_status" CHECK ("poll_logs"."status" in ('queued', 'fetching', 'waiting_retry', 'complete', 'missing', 'failed'));--> statement-breakpoint
+ALTER TABLE "poll_logs" ADD CONSTRAINT "poll_logs_lifecycle" CHECK (((("poll_logs"."status" in ('queued', 'fetching', 'waiting_retry') and "poll_logs"."finished_at" is null) or (not "poll_logs"."status" in ('queued', 'fetching', 'waiting_retry') and "poll_logs"."finished_at" is not null)) and (("poll_logs"."status" = 'complete' and "poll_logs"."listing_fields" is not null) or ("poll_logs"."status" <> 'complete' and "poll_logs"."listing_fields" is null)) and ("poll_logs"."delivered_at" is null or "poll_logs"."status" in ('complete', 'missing'))));--> statement-breakpoint
+ALTER TABLE "poll_logs" ADD CONSTRAINT "poll_logs_failures" CHECK ((jsonb_typeof("poll_logs"."failed_attempts") = 'array' and jsonb_array_length("poll_logs"."failed_attempts") between 0 and 3 and ("poll_logs"."status" <> 'queued' or jsonb_array_length("poll_logs"."failed_attempts") = 0) and ("poll_logs"."status" not in ('failed', 'waiting_retry') or jsonb_array_length("poll_logs"."failed_attempts") > 0) and ("poll_logs"."status" = 'failed' or jsonb_array_length("poll_logs"."failed_attempts") < 3)));

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PollDeliveryService } from '@src/modules/listing-tracking/services';
 import { PollingLoop } from '@src/tools/worker/polling-loop';
+import { BackgroundWorker } from '@src/tools/worker/background-worker.decorator';
 import { ConfigService } from '@src/tools/config';
 import { LoggerService } from '@src/tools/logger';
 import { POLL_BATCH_SIZE } from '../consts/poll-batch.const';
@@ -14,6 +15,7 @@ import { ExecutionStatus } from '../types';
 
 /** Rotates bounded tracking, submission and result pages every five seconds. */
 @Injectable()
+@BackgroundWorker()
 export class PollOrchestratorWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly loop = new PollingLoop(
     () => this.tick(),

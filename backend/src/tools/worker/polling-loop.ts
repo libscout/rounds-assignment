@@ -13,6 +13,7 @@ export class PollingLoop {
 
   start() {
     if (!this.timer) {
+      this.stopped = false;
       this.schedule(0);
     }
   }
@@ -36,5 +37,6 @@ export class PollingLoop {
     this.stopped = true;
     clearTimeout(this.timer);
     await this.cycle;
+    this.timer = undefined;
   }
 }

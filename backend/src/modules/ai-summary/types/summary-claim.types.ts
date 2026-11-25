@@ -1,5 +1,10 @@
 import type { SummaryDiff } from './summary.types';
 
+export interface SummaryProvider {
+  readonly canSend: boolean;
+  readonly usesLiveProvider: boolean;
+}
+
 export interface IdleSummaryClaim {
   readonly kind: 'idle';
 }

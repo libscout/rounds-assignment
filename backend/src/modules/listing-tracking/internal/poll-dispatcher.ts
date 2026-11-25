@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ListingSourceClient } from '@src/external/listing-source';
 import { ConfigService } from '@src/tools/config';
 import { LoggerService } from '@src/tools/logger';
+import { BackgroundWorker } from '@src/tools/worker/background-worker.decorator';
 import { PollOutcomeMapper } from './poll-outcome-mapper';
 import { PollAttemptService } from './poll-attempt.service';
 import { OutcomeKind, type ClaimedPoll, type PollResult } from '../types';
@@ -14,6 +15,7 @@ import { START_SPACING_MS } from '../consts/polling.const';
 
 /** Starts due polls within the source rate and concurrency limits and pauses dispatch during cooldowns. */
 @Injectable()
+@BackgroundWorker()
 export class PollDispatcher implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
 
@@ -43,6 +45,7 @@ export class PollDispatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   /** Restores the persisted cooldown and schedules the first paced dispatch. */
   async onApplicationBootstrap() {
+    this.stopping = false;
     this.cooldownUntil = await this.attempts.recover();
     this.nextStart = performance.now() + START_SPACING_MS;
     this.schedule(START_SPACING_MS);

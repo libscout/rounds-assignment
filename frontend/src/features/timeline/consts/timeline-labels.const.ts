@@ -53,4 +53,12 @@ export const summaryStatuses = {
   budget_exhausted: { label: 'Daily limit reached', tone: 'amber' },
 } satisfies Record<Snapshot['summaryStatus'], { label: string; tone: string }>;
 
+export const comparisonMessages = {
+  completed: 'No change recorded.',
+  pending: 'Comparison pending.',
+  error: 'Comparison failed.',
+  unavailable: 'Comparison status unavailable.',
+  not_applicable: null,
+} satisfies Record<Snapshot['comparisonStatus'], string | null>;
+
 export const listingFields = Object.keys(fieldLabels) as Field[];

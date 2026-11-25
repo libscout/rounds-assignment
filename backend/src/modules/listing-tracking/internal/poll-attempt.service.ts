@@ -40,6 +40,11 @@ export class PollAttemptService {
     return this.attempts.claim(this.config.getEnv('POLL_INTERVAL_MS'));
   }
 
+  /** Requests the next available dispatch for an active competitor, reusing any unfinished poll. */
+  requestPoll(id: string) {
+    return this.attempts.requestPoll(id);
+  }
+
   /** Releases a claim when its source request never started. */
   releaseUnstarted(poll: ClaimedPoll) {
     return this.attempts.releaseUnstarted(poll);

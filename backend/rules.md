@@ -24,6 +24,7 @@ src
 │
 ├── modules                       # Business domains / bounded contexts
 │   └── [domain-name]
+│       ├── consts                # Constants shared across files in this domain
 │       ├── controllers           # HTTP/API transport layer
 │       ├── dto                   # DTOs and validation schemas
 │       ├── entities              # Database entities/models
@@ -102,7 +103,7 @@ Business domains / bounded contexts.
 
 Rules:
 
-- each module should be self-contained
+- keep leaf modules independent of one another
 - business logic belongs here
 - modules communicate through public APIs only
 
@@ -114,6 +115,7 @@ Each business module should follow this structure:
 
 ```txt
 modules/[domain-name]
+├── consts
 ├── controllers
 ├── dto
 ├── entities
@@ -123,6 +125,10 @@ modules/[domain-name]
 ├── internal
 └── index.ts
 ```
+
+## `consts/`
+
+A constant used in only one file can stay in that file. When several files use the same constant, put it in the owning module’s `consts/` folder. Group related shared values in a descriptive `*.const.ts` file, such as `ai-limits.const.ts`. Infrastructure tools and external integrations follow the same convention. Keep values derived from a particular call local to that call.
 
 ## `controllers/`
 
@@ -157,7 +163,9 @@ Contains:
 
 ## `types/`
 
-Define each domain enum as a named TypeScript enum in its own `*.enum.ts` file. For a persisted enum, derive the Drizzle `pgEnum` mapping from the TypeScript enum in that file. Expose enums through the leaf `types/index.ts`.
+Define each domain enum as a named TypeScript enum in its own `*.enum.ts` file. Persist enum values in typed `text` columns on the owning table, using `.$type<DomainEnum>()`. Add a database `CHECK` derived from the TypeScript enum values or the subset the column accepts. Expose enums through the leaf `types/index.ts`.
+
+Give each object variant of a union a named interface or type alias. In a discriminated union, give each variant a single discriminator value, even when several variants share payload fields. The variants and their union can live in the same file.
 
 ## `entities/`
 
@@ -183,6 +191,10 @@ For example, write `check('watchlist_attempt_range', between(nextAttemptNo, 1, 3
 
 Put application database reads, writes, and transactions in injectable repository classes under the owning module’s `repositories/` folder. Name each file `*.repository.ts`. Services and workers call repository methods and own the business decisions that determine when to use them.
 
+When several repository operations depend on the same SQL predicate or computed expression, define it once as a named `private static` method on the owning repository. For example, `list()`, `head()`, and `acknowledge()` all use `PollDeliveryRepository.outstanding()` to identify polls awaiting delivery. Keep simple conditions used by a single query inline.
+
+Extract complex SQL operations into named repository methods when doing so makes the transaction easier to follow. Keep each query helper to at most three parameters, including the transaction.
+
 ---
 
 ## `services/`
@@ -194,6 +206,7 @@ Rules:
 - represents the public API of the module
 - may be used by other modules
 - should contain reusable business use-cases
+- write each use-case entry point as a sequence of named operations in business order. Delegate validation, mapping, and persistence to the method or collaborator that owns each step. Run independent reads concurrently when their results are combined.
 - keep service classes small and focused
 - split large services by business responsibility or use-case
 
@@ -247,9 +260,15 @@ import { UserRegistrationService } from '../users/services/user-registration.ser
 
 ## General
 
+- Use the project's ESLint and Prettier configurations to keep code readable and consistently formatted.
 - Prefer dependency injection over singletons.
+- Use concrete classes and composition for shared behavior. Avoid abstract base classes.
+- Use a ternary only as the whole initializer of a named variable or as a direct return value. Give choices passed to a function or embedded in a larger expression a descriptive name. Use explicit branches for nested choices and asynchronous work.
+- Aim for functions of at most 30 lines. Split longer functions at distinct operations that can be named.
+- Give each validation guard one purpose. Check the input shape before inspecting its contents and name compound conditions when that makes their meaning clearer.
 - Keep business logic inside `modules/`.
-- In a single-class file, define stateless business-logic helpers as private static methods on the owning class. Keep controller methods focused on transport and delegate business decisions to services.
+- Put helpers used by only one class on that class. Use a `private static` method for stateless helpers and a private instance method for helpers that need instance state or injected dependencies.
+- Keep controller methods focused on transport and delegate business decisions to services.
 - Avoid framework-specific logic inside core business code.
 - Put infrastructure-level abstractions in `tools/`.
 - Put pure reusable utilities in `lib/`.
@@ -260,6 +279,10 @@ import { UserRegistrationService } from '../users/services/user-registration.ser
 ## Purpose comments
 
 Give each backend implementation class a one-sentence JSDoc comment explaining its responsibility. This includes workers, controllers, clients, Nest modules, services, and repositories. Place the comment immediately above the first class decorator or above the class declaration when there are no class decorators. Purpose comments are optional for DTOs.
+
+Give every repository and service method, including constructors and private helpers, a short JSDoc sentence describing its contract. Mention ordering, retry behavior, side effects, or the meaning of a missing result when callers rely on those details. For example, the description for `PollDeliveryRepository.head()` is “Returns the competitor’s oldest outstanding poll ID, or `undefined` when none is waiting.”
+
+Give each named standalone function a short JSDoc sentence as well, including private helpers and named arrow functions. Describe what the caller receives or what the function changes.
 
 ---
 
@@ -298,7 +321,7 @@ users/services/
 
 # File Naming Conventions
 
-Define each data schema in its own TypeScript file. Give each request or response DTO a `*.dto.ts` file, each standalone validation schema a `*.schema.ts` file, each Drizzle table a `*.table.ts` file, and each PostgreSQL enum a `*.enum.ts` file. Name the file after the definition, such as `create-competitor.dto.ts` or `watchlist.table.ts`. A leaf `index.ts` may re-export several definitions.
+Define each data schema in its own TypeScript file. Give each request or response DTO a `*.dto.ts` file, each standalone validation schema a `*.schema.ts` file, each Drizzle table a `*.table.ts` file, and each domain enum a `*.enum.ts` file. Name the file after the definition, such as `create-competitor.dto.ts` or `watchlist.table.ts`. A leaf `index.ts` may re-export several definitions.
 
 - `*.module.ts` — Nest.js module definition.
   <br><br>
@@ -315,7 +338,8 @@ Define each data schema in its own TypeScript file. Give each request or respons
 - `*.schema.ts` — validation schema.
   <br><br>
 - `*.types.ts` — TypeScript type definitions.
-- `*.const.ts` — constants.
+- `*.enum.ts` — a domain enum in the owning module’s `types/` folder.
+- `*.const.ts` — related constants shared across files in the owning module.
 
 ---
 

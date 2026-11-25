@@ -1,5 +1,6 @@
 import type { Snapshot } from './api';
 import { AiSummary, FieldChanges, ListingDetails } from './ListingContent';
+import FailedAttempts from './FailedAttempts';
 import { changeTitle } from './presentation';
 import { timestamp } from './consts/date-formats.const';
 
@@ -30,12 +31,8 @@ export default function ChangeEntry({ poll }: { poll: Snapshot }) {
           </p>
         )}
         <FieldChanges poll={poll} />
-        {!disappeared && (
-          <details>
-            <summary>View listing details</summary>
-            <ListingDetails poll={poll} />
-          </details>
-        )}
+        <ListingDetails poll={poll} />
+        <FailedAttempts attempts={poll.failedAttempts} />
         <AiSummary poll={poll} />
       </article>
     </li>

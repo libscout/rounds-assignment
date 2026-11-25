@@ -11,6 +11,7 @@ import {
   type PendingSummaryResult,
   type SubmitSummary,
   type SummaryClaim,
+  type SummaryProvider,
   type SummaryResult,
 } from '../types';
 import { DAILY_AI_LIMIT, MAX_AI_ATTEMPTS } from '../consts/ai-limits.const';
@@ -45,17 +46,17 @@ export class AiSummaryRepository {
     });
   }
 
-  /** Reserves a daily call and leases the oldest due job, or records the exhausted limit. */
-  claim(): Promise<SummaryClaim> {
+  /** Leases the oldest due job and reserves quota only when the provider can send it. */
+  claim({ canSend, usesLiveProvider }: SummaryProvider): Promise<SummaryClaim> {
     return this.db.transaction<SummaryClaim>(async (tx) => {
       const job = await AiSummaryRepository.lockNextJob(tx);
       if (!job) {
         return { kind: 'idle' };
       }
-      if (job.attemptCount >= MAX_AI_ATTEMPTS) {
+      if (!canSend || job.attemptCount >= MAX_AI_ATTEMPTS) {
         return AiSummaryRepository.closeJob(tx, job.pollId, SummaryStatus.Failed);
       }
-      const reserved = await AiSummaryRepository.reserveDailyCall(tx);
+      const reserved = await AiSummaryRepository.reserveDailyCall(tx, usesLiveProvider);
       if (!reserved) {
         return AiSummaryRepository.closeJob(
           tx,
@@ -107,21 +108,29 @@ export class AiSummaryRepository {
   }
 
   /** Increments today's UTC call count atomically and returns false when the budget is full. */
-  private static async reserveDailyCall(tx: DatabaseTransaction) {
-    const { day, calls } = dailyAiUsage;
+  private static async reserveDailyCall(
+    tx: DatabaseTransaction,
+    usesLiveProvider: boolean,
+  ) {
+    const { day, calls, liveCalls } = dailyAiUsage;
+    const live = Number(usesLiveProvider);
     const result = await tx
       .insert(dailyAiUsage)
-      .values({ day: sql`(statement_timestamp() at time zone 'UTC')::date`, calls: 1 })
+      .values({
+        day: sql`(statement_timestamp() at time zone 'UTC')::date`,
+        calls: 1,
+        liveCalls: live,
+      })
       .onConflictDoUpdate({
         target: day,
-        set: { calls: sql`${calls} + 1` },
+        set: { calls: sql`${calls} + 1`, liveCalls: sql`${liveCalls} + ${live}` },
         setWhere: lt(calls, DAILY_AI_LIMIT),
       });
 
     return result.rowCount === 1;
   }
 
-  /** Finishes a locked job whose retry allowance or daily budget has run out. */
+  /** Closes a locked job that cannot start another attempt. */
   private static async closeJob(
     tx: DatabaseTransaction,
     id: string,

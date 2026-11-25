@@ -7,8 +7,10 @@ export const dailyAiUsage = pgTable(
   {
     day: date().primaryKey(),
     calls: integer().notNull(),
+    liveCalls: integer('live_calls').notNull().default(0),
   },
-  ({ calls }) => [
+  ({ calls, liveCalls }) => [
     check('daily_ai_calls_range', between(calls, 1, DAILY_AI_LIMIT).inlineParams()),
+    check('daily_ai_live_calls_range', between(liveCalls, 0, calls).inlineParams()),
   ],
 );

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { loadPage } from './api';
 import type { HistoryView, Snapshot } from './api';
-import EmptyChanges from './EmptyChanges';
-import ChangeEntry from './ChangeEntry';
+import Changes from './Changes';
 import PollEntry from './PollEntry';
+import PollNow from './PollNow';
 import AdvanceListing from '../mock-controls/AdvanceListing';
 import { calendar } from './consts/date-formats.const';
 
@@ -33,6 +33,7 @@ export default function Timeline({ id, view }: { id: string; view: HistoryView }
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [page, setPage] = useState<{ cursor: string | null }>({ cursor: null });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,22 +59,18 @@ export default function Timeline({ id, view }: { id: string; view: HistoryView }
     return () => controller.abort();
   }, [id, view, page]);
 
-  /** Requests the page at the supplied cursor and displays the loading state. */
+  /** Requests a page, refreshing comparison status when returning to the latest entries. */
   function read(cursor: string | null) {
+    if (cursor === null) {
+      setRevision((value) => value + 1);
+    }
     setStatus('loading');
     setPage({ cursor });
   }
 
   const changesCurrent = changes ? 'page' : undefined;
   const pollsCurrent = !changes ? 'page' : undefined;
-  const emptyState = changes ? (
-    <EmptyChanges
-      id={id}
-      pollsHref={pollsHref}
-    />
-  ) : (
-    <p>No polls recorded yet.</p>
-  );
+  const showEmpty = status === 'ready' && rows.length === 0;
   const loadError = page.cursor
     ? 'Could not load older ' + itemsLabel + '.'
     : 'Could not load ' + itemsLabel + '.';
@@ -87,7 +84,14 @@ export default function Timeline({ id, view }: { id: string; view: HistoryView }
         ← Watchlist
       </a>
       <h1>{id}</h1>
-      {import.meta.env.DEV && <AdvanceListing id={id} />}
+      <div className="listing-actions">
+        <PollNow
+          id={id}
+          view={view}
+          onFinished={() => read(null)}
+        />
+        {import.meta.env.DEV && <AdvanceListing id={id} />}
+      </div>
       <nav
         className="history-nav"
         aria-label="Competitor history"
@@ -104,17 +108,22 @@ export default function Timeline({ id, view }: { id: string; view: HistoryView }
         >
           All polls
         </a>
+        <button
+          type="button"
+          disabled={status === 'loading'}
+          onClick={() => read(null)}
+        >
+          Refresh
+        </button>
       </nav>
-      {changes && <h2 className="sr-only">Change history</h2>}
-      {changes && rows.length > 0 && (
-        <ol className="changes">
-          {rows.map((poll) => (
-            <ChangeEntry
-              key={poll.pollId}
-              poll={poll}
-            />
-          ))}
-        </ol>
+      {changes && (
+        <Changes
+          id={id}
+          rows={rows}
+          pollsHref={pollsHref}
+          showEmpty={showEmpty}
+          revision={revision}
+        />
       )}
       {!changes && rows.length > 0 && (
         <div className="section-heading">
@@ -142,7 +151,7 @@ export default function Timeline({ id, view }: { id: string; view: HistoryView }
             </ol>
           </section>
         ))}
-      {status === 'ready' && rows.length === 0 && emptyState}
+      {!changes && showEmpty && <p>No polls recorded yet.</p>}
       {status === 'loading' && <output>Loading {itemsLabel}…</output>}
       {status === 'error' && (
         <div role="alert">

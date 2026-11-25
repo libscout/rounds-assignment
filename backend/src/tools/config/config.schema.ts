@@ -55,7 +55,17 @@ export class EnvSchema {
 
   @IsOptional()
   @IsString()
-  DEEPSEEK_API_KEY?: string;
+  AI_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  DEMO_RESET_ENABLED?: string;
+
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  MOCK_SOURCE_TARGET = 'http://localhost:4002';
+
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  MOCK_LLM_TARGET = 'http://localhost:4001';
 
   @IsInt()
   @Min(1)

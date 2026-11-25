@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@src/tools/config';
 
+const MAX_COMPLETION_TOKENS = 128;
+
 export interface ChatMessage {
   role: 'system' | 'user';
   content: string;
@@ -31,33 +33,43 @@ export interface InvalidOutputChatReply extends ChatFailureDetails {
 export type ChatReply =
   ReadyChatReply | TimeoutChatReply | FailedChatReply | InvalidOutputChatReply;
 
-/** Sends a single deadline-bound Chat Completions request to DeepSeek or the configured HTTP mock. */
+/** Sends a deadline-bound request to the configured Chat Completions endpoint. */
 @Injectable()
 export class AiChatClient {
   private readonly endpoint: URL;
 
   private readonly deepseek: boolean;
 
+  private readonly apiKey?: string;
+
+  readonly canSend: boolean;
+
+  readonly usesLiveProvider: boolean;
+
   constructor(private readonly config: ConfigService) {
-    const defaultBaseUrl = config.getEnv('DEEPSEEK_API_KEY')
+    this.apiKey = config.getEnv('AI_API_KEY')?.trim();
+    const defaultBaseUrl = this.apiKey
       ? 'https://api.deepseek.com'
       : 'http://localhost:4001/v1';
     const base = config.getEnv('AI_BASE_URL') ?? defaultBaseUrl;
     this.endpoint = new URL(base.replace(/\/+$/, '') + '/chat/completions');
     this.deepseek = this.endpoint.origin === 'https://api.deepseek.com';
+    this.canSend = !this.deepseek || Boolean(this.apiKey);
+    this.usesLiveProvider =
+      this.endpoint.origin !== new URL(config.getEnv('MOCK_LLM_TARGET')).origin;
   }
 
+  /** Sends one completion when the configured endpoint has its required credentials. */
   async complete(messages: ChatMessage[], pollId: string): Promise<ChatReply> {
+    if (!this.canSend) {
+      return { kind: 'failed', retryable: false };
+    }
     const signal = AbortSignal.timeout(10_000);
     try {
-      const headers = this.headers(pollId);
-      if (!headers) {
-        return { kind: 'failed', retryable: false };
-      }
       const response = await fetch(this.endpoint, {
         method: 'POST',
         redirect: 'error',
-        headers,
+        headers: this.headers(pollId),
         signal,
         body: this.requestBody(messages),
       });
@@ -75,29 +87,42 @@ export class AiChatClient {
     }
   }
 
-  private headers(pollId: string): Record<string, string> | undefined {
+  /** Adds the selected provider's bearer token when configured. */
+  private headers(pollId: string): Record<string, string> {
     const headers = { 'content-type': 'application/json', 'x-request-id': pollId };
-    if (!this.deepseek) {
-      return headers;
+    if (this.apiKey) {
+      return { ...headers, authorization: 'Bearer ' + this.apiKey };
     }
-    const key = this.config.getEnv('DEEPSEEK_API_KEY');
-    if (key) {
-      return { ...headers, authorization: 'Bearer ' + key };
-    }
+
+    return headers;
   }
 
   private requestBody(messages: ChatMessage[]) {
     const defaultModel = this.deepseek ? 'deepseek-flash' : 'mock-llm';
-    const providerOptions = this.deepseek
-      ? { thinking: { type: 'disabled' }, max_tokens: 128 }
-      : {};
+    const model = this.config.getEnv('AI_MODEL') ?? defaultModel;
 
     return JSON.stringify({
-      model: this.config.getEnv('AI_MODEL') ?? defaultModel,
+      model,
       messages,
+      max_tokens: MAX_COMPLETION_TOKENS,
       stream: false,
-      ...providerOptions,
+      ...this.reasoningOptions(model),
     });
+  }
+
+  /** Disables optional reasoning on the DeepSeek endpoints so the token budget goes to the summary. */
+  private reasoningOptions(model: string) {
+    if (this.deepseek) {
+      return { thinking: { type: 'disabled' } };
+    }
+    const flash =
+      model === 'deepseek/deepseek-flash' ||
+      model.startsWith('deepseek/deepseek-v4.1-flash');
+    if (this.endpoint.origin === 'https://openrouter.ai' && flash) {
+      return { reasoning: { effort: 'none' } };
+    }
+
+    return {};
   }
 
   private static async readResponse(response: Response): Promise<ChatReply> {
@@ -120,21 +145,26 @@ export class AiChatClient {
     return { kind: 'ready', text };
   }
 
+  /** Extracts the summary from a completed, non-refused text reply. */
   private static summaryText(data: unknown) {
     if (!AiChatClient.isObject(data) || !Array.isArray(data.choices)) {
       return undefined;
     }
     const choice: unknown = data.choices[0];
-    if (!AiChatClient.isObject(choice) || choice.finish_reason === 'length') {
+    if (!AiChatClient.isObject(choice)) {
       return undefined;
     }
-    if (
-      !AiChatClient.isObject(choice.message) ||
-      typeof choice.message.content !== 'string'
-    ) {
+    const { finish_reason: reason, message } = choice;
+    if (reason !== undefined && reason !== 'stop') {
       return undefined;
     }
-    const text = choice.message.content;
+    if (!AiChatClient.isObject(message) || message.refusal) {
+      return undefined;
+    }
+    const text = message.content;
+    if (typeof text !== 'string') {
+      return undefined;
+    }
     if (text.includes('\0') || /[\uD800-\uDFFF]/gu.test(text)) {
       return undefined;
     }
