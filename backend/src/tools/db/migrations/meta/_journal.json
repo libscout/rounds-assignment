@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1795521467839,
-      "tag": "0000_tracking",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1795522230829,
-      "tag": "0001_tracking_constraints",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1795523417816,
-      "tag": "0002_listing_snapshots",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1795526565650,
-      "tag": "0003_change_history",
+      "when": 1795597305704,
+      "tag": "0000_competitor_pulse",
       "breakpoints": true
     }
   ]

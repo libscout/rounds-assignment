@@ -1,1 +1,1 @@
-export { listingChanges } from './listing-change.table';
+export { listingComparisons } from './listing-comparison.table';

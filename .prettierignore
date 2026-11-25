@@ -1,0 +1,8 @@
+**/node_modules/
+**/dist/
+**/coverage/
+**/package-lock.json
+backend/src/tools/db/migrations/
+assignment/
+.test/
+.memory/

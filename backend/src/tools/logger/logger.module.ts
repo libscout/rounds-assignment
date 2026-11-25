@@ -4,8 +4,7 @@ import pino, { type Logger } from 'pino';
 import { ConfigService } from '@src/tools/config';
 import { ContextService } from '@src/tools/context';
 import { LoggerService } from './logger.service';
-
-export const PINO_LOGGER = 'PINO_LOGGER';
+import { PINO_LOGGER } from './consts/logger-token.const';
 
 /** Configures Pino to include service and request context in application logs. */
 @Global()
@@ -25,8 +24,10 @@ export class LoggerModule {
             const isLocal = config.getEnv('IS_LOCAL_ENV') === 'true';
             const isDev = config.getEnv('NODE_ENV') !== 'production';
 
+            const defaultLevel = isLocal ? 'debug' : 'info';
+
             return pino({
-              level: process.env['LOG_LEVEL'] ?? (isLocal ? 'debug' : 'info'),
+              level: process.env['LOG_LEVEL'] ?? defaultLevel,
               ...((isLocal || isDev) && {
                 transport: {
                   target: 'pino-pretty',
@@ -42,10 +43,13 @@ export class LoggerModule {
                 }
                 try {
                   const uid = ctx.userID();
-                  if (uid) req['userID'] = uid;
+                  if (uid) {
+                    req['userID'] = uid;
+                  }
                 } catch {
                   /* outside request context */
                 }
+
                 return req;
               },
               formatters: {

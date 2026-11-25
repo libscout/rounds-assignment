@@ -1,0 +1,1 @@
+export const ERROR_PREVIEW_BYTES = 4096;

@@ -24,6 +24,7 @@ export class ContextService {
 
   // ── private ──────────────────────────────────────────────────────
 
+  /** Returns the active request context or throws when called outside its scope. */
   #getStore(): RequestContext {
     const ctx = this.storage.getStore();
     if (!ctx) {
@@ -31,6 +32,7 @@ export class ContextService {
         'No request context available. Ensure ContextInterceptor is applied to this route.',
       );
     }
+
     return ctx;
   }
 }

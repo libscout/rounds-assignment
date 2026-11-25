@@ -3,15 +3,20 @@ import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { Server } from 'node:http';
 import { agent } from 'supertest';
-import { OutcomeKind } from '@src/modules/tracking/types';
-import { ChangeKind, SummaryStatus } from '@src/modules/change-history/types';
+import { OutcomeKind } from '@src/modules/listing-tracking/types';
+import { ChangeKind } from '@src/modules/change-history/types';
+import { ProcessingStatusDto } from '../dto/processing-status.dto';
 import { SnapshotDto } from '../dto/snapshot.dto';
 import { CompetitorTimelineService } from '../services/competitor-timeline.service';
 import { CompetitorTimelineController } from './competitor-timeline.controller';
 
 describe('competitor timeline HTTP contract', () => {
   let app: INestApplication<Server>;
-  const timeline = { page: jest.fn() };
+  const timeline = {
+    page: jest.fn(),
+    listCompetitors: jest.fn(),
+    processingStatus: jest.fn(),
+  };
   beforeAll(async () => {
     const nest = await Test.createTestingModule({
       controllers: [CompetitorTimelineController],
@@ -31,9 +36,9 @@ describe('competitor timeline HTTP contract', () => {
   });
   beforeEach(() => jest.resetAllMocks());
   it('serializes the bare array, nested diffs and cursor header', async () => {
-    const cursor = 'a439191c-7816-44fd-ae91-dda03eb0b058';
+    const cursor = 'a439191c-7816-74fd-ae91-dda03eb0b058';
     const row = {
-      pollId: 'a439191c-7816-44fd-ae91-dda03eb0b059',
+      pollId: 'a439191c-7816-74fd-ae91-dda03eb0b059',
       fetchedAt: '2026-08-03T09:00:00.000Z',
       title: null,
       tagline: null,
@@ -44,7 +49,7 @@ describe('competitor timeline HTTP contract', () => {
       changeKind: ChangeKind.Disappeared,
       changedFields: {},
       summary: null,
-      summaryStatus: SummaryStatus.Pending,
+      summaryStatus: 'pending',
     };
     const change = {
       ...row,
@@ -97,6 +102,49 @@ describe('competitor timeline HTTP contract', () => {
       .get('/api/competitors/Acme/snapshots' + query)
       .expect(400);
     expect(timeline.page).not.toHaveBeenCalled();
+  });
+  it('lists active competitors with an optional recent-change flag', async () => {
+    timeline.listCompetitors.mockResolvedValue([
+      { id: 'Foo', changedInLast24h: false },
+      { id: 'Bar', changedInLast24h: null },
+      { id: 'Baz', changedInLast24h: true },
+    ]);
+    await agent(app.getHttpServer())
+      .get('/api/competitors')
+      .expect(200, [
+        { id: 'Foo', changedInLast24h: false },
+        { id: 'Bar', changedInLast24h: null },
+        { id: 'Baz', changedInLast24h: true },
+      ]);
+  });
+  it('serializes the latest active comparison error even without a change', async () => {
+    const pollId = 'a439191c-7816-74fd-ae91-dda03eb0b058';
+    timeline.processingStatus.mockResolvedValue(
+      new ProcessingStatusDto(
+        { pollId, trackingFinishedAt: new Date(0) },
+        {
+          pollId,
+          finishedAt: new Date(0),
+          outcomeKind: OutcomeKind.Complete,
+          fields: null,
+          failedAttempts: [],
+        },
+      ),
+    );
+    await agent(app.getHttpServer())
+      .get('/api/competitors/Foo/status')
+      .expect(200, {
+        latestTrackingPoll: {
+          pollId,
+          finishedAt: new Date(0).toISOString(),
+          outcomeKind: 'complete',
+        },
+        latestComparisonError: {
+          pollId,
+          trackingFinishedAt: new Date(0).toISOString(),
+          status: 'error',
+        },
+      });
   });
   it('validates the competitor ID', async () => {
     await agent(app.getHttpServer()).get('/api/competitors/%20/snapshots').expect(400);

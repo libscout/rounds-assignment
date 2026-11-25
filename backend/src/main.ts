@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@src/tools/config';
 import { LoggerService } from '@src/tools/logger';
 
+/** Starts the HTTP API with request logging, response serialization and graceful shutdown. */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 

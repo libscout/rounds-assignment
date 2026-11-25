@@ -1,24 +1,46 @@
-import { Injectable } from '@nestjs/common';
-import { compareListing } from '../internal/listing-comparison';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ListingChangeRepository } from '../repositories/listing-change.repository';
-import type { ListingChange, ListingDiff, Observation } from '../types';
+import type { Observation } from '../types';
 
-/** Records meaningful listing changes and looks them up by poll, competitor, or time window. */
+/** Records source-ordered observations and exposes durable comparison decisions and diffs. */
 @Injectable()
 export class ChangeHistoryService {
+  /** Uses the comparison repository to record observations and read change history. */
   constructor(private readonly changes: ListingChangeRepository) {}
 
-  async record(observation: Observation): Promise<ListingDiff | null> {
-    const diff = compareListing(observation);
-    if (diff) await this.changes.insertOnce(observation, diff);
-    return diff;
+  /** Records an observation and returns the comparison decision for its poll ID. */
+  record(input: Observation) {
+    return this.changes.record(input);
   }
 
-  byPollIds(ids: string[]): Promise<ListingChange[]> {
-    return this.changes.byPollIds(ids);
+  /** Looks up the recorded comparison decisions for a batch of polls. */
+  getDecisions(ids: string[]) {
+    return this.changes.getDecisions(ids);
   }
 
-  changedSince(ids: string[], since: Date): Promise<Set<string>> {
+  /** Returns the poll’s detected change, or null if no change has been recorded. */
+  async getChange(id: string) {
+    return (await this.changes.getDecisions([id]))[0]?.change ?? null;
+  }
+
+  /** Finds which requested competitors changed at or after the supplied time. */
+  changedSince(ids: string[], since: Date) {
     return this.changes.changedSince(ids, since);
+  }
+
+  /** Returns a page of changes for one competitor and rejects an invalid cursor. */
+  async page(competitorId: string, limit: number, cursor?: string) {
+    const rows = await this.changes.page(competitorId, limit + 1, cursor);
+    if (rows === null) {
+      throw new BadRequestException('Invalid change cursor');
+    }
+    const items = rows.slice(0, limit);
+
+    const nextCursor = rows.length > limit ? items[items.length - 1].pollId : null;
+
+    return {
+      items,
+      nextCursor,
+    };
   }
 }

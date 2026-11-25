@@ -32,7 +32,11 @@ describe('LoggerService', () => {
 
   it('writes poll metadata as top-level fields', () => {
     logger.debug('Poll finished', { pollId: 'p1', outcome: 'complete' });
-    expect(entries[0]).toMatchObject({ msg: 'Poll finished', pollId: 'p1', outcome: 'complete' });
+    expect(entries[0]).toMatchObject({
+      msg: 'Poll finished',
+      pollId: 'p1',
+      outcome: 'complete',
+    });
     expect(entries[0]).not.toHaveProperty('0');
   });
 

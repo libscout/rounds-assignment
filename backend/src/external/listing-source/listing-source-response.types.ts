@@ -1,3 +1,21 @@
+export interface ListingSourceHttpResponse {
+  httpStatus: number;
+  body?: unknown;
+  retryAfter?: string;
+  output?: string;
+}
+
+export interface ListingSourceTimeout {
+  failure: 'timeout';
+  httpStatus?: number;
+  output?: string;
+}
+
+export interface ListingSourceNetworkError {
+  failure: 'network';
+  httpStatus?: number;
+  output?: string;
+}
+
 export type ListingSourceResponse =
-  | { httpStatus: number; body?: unknown; retryAfter?: string }
-  | { failure: 'timeout' | 'network'; httpStatus?: number };
+  ListingSourceHttpResponse | ListingSourceTimeout | ListingSourceNetworkError;

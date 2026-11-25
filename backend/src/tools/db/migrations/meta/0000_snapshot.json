@@ -1,19 +1,153 @@
 {
-  "id": "77841f56-10bc-4845-ac6e-e183d136969c",
+  "id": "613fee2f-72a9-4d65-a7cd-ec538c0363f4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.pending_polls": {
-      "name": "pending_polls",
+    "public.ai_summaries": {
+      "name": "ai_summaries",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
+        "poll_id": {
+          "name": "poll_id",
           "type": "uuid",
           "primaryKey": true,
+          "notNull": true
+        },
+        "diff": {
+          "name": "diff",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "'queued'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "available_at": {
+          "name": "available_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "summary_text": {
+          "name": "summary_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ai_summaries_due_idx": {
+          "name": "ai_summaries_due_idx",
+          "columns": [
+            {
+              "expression": "available_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"ai_summaries\".\"status\" in ('queued', 'running')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ai_summary_status": {
+          "name": "ai_summary_status",
+          "value": "\"ai_summaries\".\"status\" in ('queued', 'running', 'ready', 'timeout', 'failed', 'invalid_output', 'budget_exhausted')"
+        },
+        "ai_attempt_range": {
+          "name": "ai_attempt_range",
+          "value": "\"ai_summaries\".\"attempt_count\" between 0 and 2"
+        },
+        "ai_summary_lifecycle": {
+          "name": "ai_summary_lifecycle",
+          "value": "((\"ai_summaries\".\"status\" in ('queued', 'running') and \"ai_summaries\".\"available_at\" is not null and \"ai_summaries\".\"completed_at\" is null) or (not \"ai_summaries\".\"status\" in ('queued', 'running') and \"ai_summaries\".\"available_at\" is null and \"ai_summaries\".\"completed_at\" is not null))"
+        },
+        "ai_summary_ready": {
+          "name": "ai_summary_ready",
+          "value": "((\"ai_summaries\".\"status\" = 'ready' and \"ai_summaries\".\"summary_text\" is not null and length(trim(\"ai_summaries\".\"summary_text\")) > 0) or (\"ai_summaries\".\"status\" <> 'ready' and \"ai_summaries\".\"summary_text\" is null))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.daily_ai_usage": {
+      "name": "daily_ai_usage",
+      "schema": "",
+      "columns": {
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "calls": {
+          "name": "calls",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "daily_ai_calls_range": {
+          "name": "daily_ai_calls_range",
+          "value": "\"daily_ai_usage\".\"calls\" between 1 and 2000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.listing_comparisons": {
+      "name": "listing_comparisons",
+      "schema": "",
+      "columns": {
+        "poll_id": {
+          "name": "poll_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
         },
         "competitor_id": {
           "name": "competitor_id",
@@ -21,38 +155,216 @@
           "primaryKey": false,
           "notNull": true
         },
-        "attempt_no": {
-          "name": "attempt_no",
-          "type": "smallint",
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "listing_state": {
+          "name": "listing_state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "diff": {
+          "name": "diff",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "listing_comparisons_poll_order": {
+          "name": "listing_comparisons_poll_order",
+          "columns": [
+            {
+              "expression": "competitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "listing_comparisons_changes_feed": {
+          "name": "listing_comparisons_changes_feed",
+          "columns": [
+            {
+              "expression": "competitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "observed_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"listing_comparisons\".\"diff\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "comparison_complete_state": {
+          "name": "comparison_complete_state",
+          "value": "(\"listing_comparisons\".\"listing_state\" is null or (jsonb_typeof(\"listing_comparisons\".\"listing_state\") = 'object' and \"listing_comparisons\".\"listing_state\" ?& array['title', 'tagline', 'price', 'description'] and jsonb_typeof(\"listing_comparisons\".\"listing_state\"->'title') = 'string' and jsonb_typeof(\"listing_comparisons\".\"listing_state\"->'tagline') = 'string' and jsonb_typeof(\"listing_comparisons\".\"listing_state\"->'price') = 'string' and jsonb_typeof(\"listing_comparisons\".\"listing_state\"->'description') = 'string'))"
+        },
+        "comparison_diff_shape": {
+          "name": "comparison_diff_shape",
+          "value": "(\"listing_comparisons\".\"diff\" is null or (jsonb_typeof(\"listing_comparisons\".\"diff\") = 'object' and \"listing_comparisons\".\"diff\" ?& array['kind','changedFields'] and jsonb_typeof(\"listing_comparisons\".\"diff\"->'kind') = 'string' and jsonb_typeof((\"listing_comparisons\".\"diff\"->'changedFields')) = 'object' and ((\"listing_comparisons\".\"diff\"->'changedFields') - array['title', 'tagline', 'price', 'description']) = '{}'::jsonb and case \"listing_comparisons\".\"diff\"->>'kind'\n      when 'disappeared' then (\"listing_comparisons\".\"listing_state\" is null and (\"listing_comparisons\".\"diff\"->'changedFields') = '{}'::jsonb)\n      when 'content_changed' then (\"listing_comparisons\".\"listing_state\" is not null and (\"listing_comparisons\".\"diff\"->'changedFields') <> '{}'::jsonb)\n      when 'returned' then \"listing_comparisons\".\"listing_state\" is not null\n      else false\n    end))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.poll_executions": {
+      "name": "poll_executions",
+      "schema": "",
+      "columns": {
+        "poll_id": {
+          "name": "poll_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tracking_finished_at": {
+          "name": "tracking_finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tracking_status": {
+          "name": "tracking_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'completed'"
+        },
+        "change_history_status": {
+          "name": "change_history_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_submitted'"
+        },
+        "ai_summary_status": {
+          "name": "ai_summary_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_submitted'"
+        }
+      },
+      "indexes": {
+        "execution_ai_work_idx": {
+          "name": "execution_ai_work_idx",
+          "columns": [
+            {
+              "expression": "ai_summary_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tracking_finished_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "(\"poll_executions\".\"change_history_status\" = 'completed' and \"poll_executions\".\"ai_summary_status\" in ('not_submitted', 'submitted'))",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "execution_tracking_done": {
+          "name": "execution_tracking_done",
+          "value": "\"poll_executions\".\"tracking_status\" = 'completed'"
+        },
+        "execution_history_required": {
+          "name": "execution_history_required",
+          "value": "\"poll_executions\".\"change_history_status\" in ('not_submitted', 'submitted', 'completed', 'error')"
+        },
+        "execution_ai_summary_status": {
+          "name": "execution_ai_summary_status",
+          "value": "\"poll_executions\".\"ai_summary_status\" in ('not_submitted', 'submitted', 'completed', 'error', 'not_required')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.poll_logs": {
+      "name": "poll_logs",
+      "schema": "",
+      "columns": {
+        "poll_id": {
+          "name": "poll_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "competitor_id": {
+          "name": "competitor_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "status": {
           "name": "status",
-          "type": "poll_status",
-          "typeSchema": "public",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pending'"
+          "default": "'fetching'"
         },
-        "outcome_kind": {
-          "name": "outcome_kind",
-          "type": "poll_outcome_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "http_status": {
-          "name": "http_status",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response": {
-          "name": "response",
+        "listing_fields": {
+          "name": "listing_fields",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "failed_attempts": {
+          "name": "failed_attempts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "created_at": {
           "name": "created_at",
@@ -67,48 +379,106 @@
           "primaryKey": false,
           "notNull": false
         },
-        "delivery_attempts": {
-          "name": "delivery_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_delivery_at": {
-          "name": "next_delivery_at",
+        "delivered_at": {
+          "name": "delivered_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "pending_polls_delivery_idx": {
-          "name": "pending_polls_delivery_idx",
+        "poll_logs_open_idx": {
+          "name": "poll_logs_open_idx",
           "columns": [
             {
-              "expression": "next_delivery_at",
+              "expression": "competitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"poll_logs\".\"status\" in ('fetching', 'waiting_retry')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "poll_logs_competitor_order_idx": {
+          "name": "poll_logs_competitor_order_idx",
+          "columns": [
+            {
+              "expression": "competitor_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "id",
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "poll_logs_timeline_idx": {
+          "name": "poll_logs_timeline_idx",
+          "columns": [
+            {
+              "expression": "competitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "finished_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"poll_logs\".\"finished_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "poll_logs_unack_order_idx": {
+          "name": "poll_logs_unack_order_idx",
+          "columns": [
+            {
+              "expression": "competitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "poll_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"pending_polls\".\"status\" in ('success', 'error')",
+          "where": "(\"poll_logs\".\"delivered_at\" is null and \"poll_logs\".\"status\" in ('complete', 'missing'))",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "pending_polls_competitor_id_watchlist_id_fk": {
-          "name": "pending_polls_competitor_id_watchlist_id_fk",
-          "tableFrom": "pending_polls",
+        "poll_logs_competitor_id_watchlist_id_fk": {
+          "name": "poll_logs_competitor_id_watchlist_id_fk",
+          "tableFrom": "poll_logs",
           "tableTo": "watchlist",
           "columnsFrom": [
             "competitor_id"
@@ -121,32 +491,24 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "pending_polls_competitor_id_unique": {
-          "name": "pending_polls_competitor_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "competitor_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "pending_polls_attempt_range": {
-          "name": "pending_polls_attempt_range",
-          "value": "\"pending_polls\".\"attempt_no\" between 1 and 3"
+        "poll_logs_status": {
+          "name": "poll_logs_status",
+          "value": "\"poll_logs\".\"status\" in ('fetching', 'waiting_retry', 'complete', 'missing', 'failed')"
         },
-        "pending_polls_delivery_count": {
-          "name": "pending_polls_delivery_count",
-          "value": "\"pending_polls\".\"delivery_attempts\" >= 0"
+        "poll_logs_uuidv7": {
+          "name": "poll_logs_uuidv7",
+          "value": "uuid_extract_version(\"poll_logs\".\"poll_id\") is not distinct from 7"
         },
-        "pending_polls_http_status": {
-          "name": "pending_polls_http_status",
-          "value": "\"pending_polls\".\"http_status\" between 100 and 599"
+        "poll_logs_lifecycle": {
+          "name": "poll_logs_lifecycle",
+          "value": "(((\"poll_logs\".\"status\" in ('fetching', 'waiting_retry') and \"poll_logs\".\"finished_at\" is null) or (not \"poll_logs\".\"status\" in ('fetching', 'waiting_retry') and \"poll_logs\".\"finished_at\" is not null)) and ((\"poll_logs\".\"status\" = 'complete' and \"poll_logs\".\"listing_fields\" is not null) or (\"poll_logs\".\"status\" <> 'complete' and \"poll_logs\".\"listing_fields\" is null)) and (\"poll_logs\".\"delivered_at\" is null or \"poll_logs\".\"status\" in ('complete', 'missing')))"
         },
-        "pending_polls_lifecycle": {
-          "name": "pending_polls_lifecycle",
-          "value": "\n    (\"pending_polls\".\"status\" = 'pending' and \"pending_polls\".\"outcome_kind\" is null and \"pending_polls\".\"finished_at\" is null and \"pending_polls\".\"next_delivery_at\" is null)\n    or (\"pending_polls\".\"finished_at\" is not null and \"pending_polls\".\"next_delivery_at\" is not null and \"pending_polls\".\"outcome_kind\" is not null and (\n      (\"pending_polls\".\"status\" = 'success' and \"pending_polls\".\"outcome_kind\" in ('complete', 'partial', 'missing'))\n      or (\"pending_polls\".\"status\" = 'error' and \"pending_polls\".\"outcome_kind\" in\n        ('rate_limited', 'upstream_error', 'timeout', 'transport_error', 'invalid_response', 'interrupted'))\n    ))\n  "
+        "poll_logs_failures": {
+          "name": "poll_logs_failures",
+          "value": "(jsonb_typeof(\"poll_logs\".\"failed_attempts\") = 'array' and jsonb_array_length(\"poll_logs\".\"failed_attempts\") between 0 and 3 and (\"poll_logs\".\"status\" not in ('failed', 'waiting_retry') or jsonb_array_length(\"poll_logs\".\"failed_attempts\") > 0) and (\"poll_logs\".\"status\" = 'failed' or jsonb_array_length(\"poll_logs\".\"failed_attempts\") < 3))"
         }
       },
       "isRLSEnabled": false
@@ -191,25 +553,11 @@
           "primaryKey": true,
           "notNull": true
         },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
         "next_due_at": {
           "name": "next_due_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "next_attempt_no": {
-          "name": "next_attempt_no",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
         },
         "last_dispatched_poll_id": {
           "name": "last_dispatched_poll_id",
@@ -236,7 +584,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"watchlist\".\"active\"",
+          "where": "\"watchlist\".\"next_due_at\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -246,45 +594,11 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "watchlist_active_due": {
-          "name": "watchlist_active_due",
-          "value": "\"watchlist\".\"active\" = (\"watchlist\".\"next_due_at\" is not null)"
-        },
-        "watchlist_attempt_range": {
-          "name": "watchlist_attempt_range",
-          "value": "\"watchlist\".\"next_attempt_no\" between 1 and 3"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
-  "enums": {
-    "public.poll_outcome_kind": {
-      "name": "poll_outcome_kind",
-      "schema": "public",
-      "values": [
-        "complete",
-        "partial",
-        "missing",
-        "rate_limited",
-        "upstream_error",
-        "timeout",
-        "transport_error",
-        "invalid_response",
-        "interrupted"
-      ]
-    },
-    "public.poll_status": {
-      "name": "poll_status",
-      "schema": "public",
-      "values": [
-        "pending",
-        "success",
-        "error"
-      ]
-    }
-  },
+  "enums": {},
   "schemas": {},
   "sequences": {},
   "roles": {},

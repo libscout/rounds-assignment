@@ -1,14 +1,20 @@
 import { Module } from '@nestjs/common';
+import { AiSummaryModule } from '@src/modules/ai-summary/ai-summary.module';
 import { ChangeHistoryModule } from '@src/modules/change-history/change-history.module';
-import { TrackingModule } from '@src/modules/tracking/tracking.module';
+import { PollOrchestratorModule } from '@src/modules/poll-orchestrator/poll-orchestrator.module';
+import { ListingTrackingModule } from '@src/modules/listing-tracking/listing-tracking.module';
 import { CompetitorTimelineController } from './controllers/competitor-timeline.controller';
-import { ChangeFeedRepository } from './repositories/change-feed.repository';
 import { CompetitorTimelineService } from './services/competitor-timeline.service';
 
-/** Connects the competitor timeline endpoint to tracking and change history. */
+/** Serves read-only HTTP views over the public leaf and execution APIs. */
 @Module({
-  imports: [TrackingModule, ChangeHistoryModule],
+  imports: [
+    ListingTrackingModule,
+    ChangeHistoryModule,
+    AiSummaryModule,
+    PollOrchestratorModule,
+  ],
   controllers: [CompetitorTimelineController],
-  providers: [CompetitorTimelineService, ChangeFeedRepository],
+  providers: [CompetitorTimelineService],
 })
 export class CompetitorTimelineModule {}

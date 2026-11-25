@@ -45,9 +45,25 @@ export class EnvSchema {
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
   LISTING_SOURCE_URL = 'http://localhost:4002';
 
+  @IsOptional()
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  AI_BASE_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_MODEL?: string;
+
+  @IsOptional()
+  @IsString()
+  DEEPSEEK_API_KEY?: string;
+
   @IsInt()
   @Min(1)
   POLL_INTERVAL_MS: number = 900_000;
+
+  @IsInt()
+  @Min(1)
+  ORCHESTRATOR_INTERVAL_MS: number = 5000;
 
   @IsInt()
   @Min(1)
@@ -58,6 +74,7 @@ export class EnvSchema {
   POLL_CONCURRENCY: number = 8;
 }
 
+/** Applies configuration defaults and throws with the invalid settings if startup validation fails. */
 export function validateEnv(raw: Record<string, unknown>): EnvSchema {
   const validated = plainToInstance(EnvSchema, raw, {
     enableImplicitConversion: true,
@@ -72,6 +89,7 @@ export function validateEnv(raw: Record<string, unknown>): EnvSchema {
     const formatted = errors
       .map((err) => {
         const constraints = Object.values(err.constraints ?? {}).join(', ');
+
         return `  ${err.property}: ${constraints}`;
       })
       .join('\n');

@@ -1,17 +1,12 @@
 import { Global, Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { MIGRATIONS_FOLDER } from './migrations.const';
 import { Pool } from 'pg';
 import { ConfigService } from '@src/tools/config';
-import * as trackingSchema from '@src/modules/tracking/entities';
-import * as changeHistorySchema from '@src/modules/change-history/entities';
-import * as summariesSchema from '@src/modules/summaries/entities';
+import { DATABASE, MIGRATIONS_FOLDER } from './consts/database.const';
 
-const schema = { ...trackingSchema, ...changeHistorySchema, ...summariesSchema };
-
-export const DATABASE = Symbol('DATABASE');
-export type Database = NodePgDatabase<typeof schema>;
+export type Database = NodePgDatabase;
+export type DatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 /** Opens the PostgreSQL connection pool, applies migrations, and closes the pool at shutdown. */
 @Global()
@@ -33,9 +28,10 @@ export type Database = NodePgDatabase<typeof schema>;
       provide: DATABASE,
       inject: [Pool],
       useFactory: async (pool: Pool): Promise<Database> => {
-        const db = drizzle(pool, { schema });
+        const db = drizzle(pool);
         try {
           await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+
           return db;
         } catch (error) {
           await pool.end();

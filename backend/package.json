@@ -7,18 +7,20 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build && tsc-alias -p tsconfig.build.json",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "npm run lint:fix && prettier --write \"{src,test}/**/*.ts\" \"*.{ts,js,mjs}\" \"eslint/*.mjs\"",
     "start": "nest start",
     "start:dev": "nest start --watch --watchAssets",
     "start:debug": "nest start --debug --watch --watchAssets",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,apps,libs}/**/*.ts\" --fix",
+    "lint": "eslint .",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --silent",
-    "test:e2e": "node --test test/e2e/competitors.test.mjs",
+    "test:e2e": "ts-node test/e2e/competitors.spec.ts",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down",
     "migration:generate": "drizzle-kit generate",
-    "migration:run": "drizzle-kit migrate"
+    "migration:run": "drizzle-kit migrate",
+    "lint:fix": "eslint . --fix",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{ts,js,mjs}\" \"eslint/*.mjs\""
   },
   "dependencies": {
     "@nestjs/common": "12.6.0",

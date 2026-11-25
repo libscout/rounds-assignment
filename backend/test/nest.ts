@@ -79,6 +79,7 @@ export class TestEnv {
         ],
       }).compile();
       await nest.init();
+
       return new TestEnv(nest, postgres);
     } catch (err) {
       await postgres.stop();

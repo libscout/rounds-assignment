@@ -1,5 +1,5 @@
 import { CompetitorTimelineModule } from '@src/modules/competitor-timeline/competitor-timeline.module';
-import { TrackingModule } from '@src/modules/tracking/tracking.module';
+import { ListingTrackingModule } from '@src/modules/listing-tracking/listing-tracking.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@src/tools/config';
 import { ContextModule } from '@src/tools/context';
@@ -11,7 +11,7 @@ import { LoggerModule } from '@src/tools/logger';
   imports: [
     ConfigModule.register(),
     DbModule,
-    TrackingModule,
+    ListingTrackingModule,
     CompetitorTimelineModule,
     ContextModule,
     LoggerModule.register({ service: 'competitor-pulse' }),

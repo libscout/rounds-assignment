@@ -1,0 +1,15 @@
+**
+!Dockerfile
+!backend/
+!backend/package*.json
+!backend/nest-cli.json
+!backend/tsconfig*.json
+!backend/src/
+!backend/src/**
+!frontend/
+!frontend/package*.json
+!frontend/index.html
+!frontend/vite.config.ts
+!frontend/tsconfig*.json
+!frontend/src/
+!frontend/src/**

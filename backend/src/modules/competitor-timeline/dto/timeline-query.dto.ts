@@ -9,6 +9,6 @@ export class TimelineQueryDto {
   limit = 50;
 
   @IsOptional()
-  @IsUUID('loose')
+  @IsUUID('7')
   cursor?: string;
 }

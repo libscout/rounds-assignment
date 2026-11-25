@@ -1,0 +1,63 @@
+services:
+  postgres:
+    extends:
+      file: ./backend/docker-compose.yml
+      service: postgres
+  listing-source:
+    extends:
+      file: ./backend/docker-compose.yml
+      service: listing-source
+  mock-llm:
+    extends:
+      file: ./backend/docker-compose.yml
+      service: mock-llm
+
+  backend:
+    build:
+      context: .
+      target: backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      listing-source:
+        condition: service_started
+      mock-llm:
+        condition: service_started
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_DATABASE: ${DB_DATABASE:-competitor_pulse}
+      LISTING_SOURCE_URL: ${LISTING_SOURCE_URL:-http://listing-source:4002}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-900000}
+      DEEPSEEK_API_KEY:
+      AI_BASE_URL:
+      AI_MODEL:
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -z "$$AI_BASE_URL" ] && [ -z "$$DEEPSEEK_API_KEY" ]; then
+          export AI_BASE_URL=http://mock-llm:4001/v1
+        fi
+        exec node dist/main
+    ports:
+      - '127.0.0.1:${API_PORT:-3000}:3000'
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    depends_on:
+      - backend
+    environment:
+      API_PROXY_TARGET: http://backend:3000
+      MOCK_SOURCE_TARGET: http://listing-source:4002
+    ports:
+      - '127.0.0.1:${UI_PORT:-5173}:5173'
+
+volumes:
+  postgres-data:

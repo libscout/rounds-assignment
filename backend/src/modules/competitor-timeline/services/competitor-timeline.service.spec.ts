@@ -1,114 +1,123 @@
 import { Test } from '@nestjs/testing';
 import { ChangeHistoryService } from '@src/modules/change-history/services';
-import { ChangeKind, SummaryStatus } from '@src/modules/change-history/types';
-import { PollObservationsService } from '@src/modules/tracking/services';
-import { OutcomeKind, type PollObservation } from '@src/modules/tracking/types';
-import { ChangeFeedRepository } from '../repositories/change-feed.repository';
+import { AiSummaryService } from '@src/modules/ai-summary/services';
+import { PollOrchestratorService } from '@src/modules/poll-orchestrator/services';
+import {
+  PollObservationsService,
+  WatchlistService,
+} from '@src/modules/listing-tracking/services';
 import { CompetitorTimelineService } from './competitor-timeline.service';
 
 describe('CompetitorTimelineService', () => {
-  const polls = {
-    page: jest.fn<
-      ReturnType<PollObservationsService['page']>,
-      Parameters<PollObservationsService['page']>
-    >(),
-  };
-  const changes = {
-    byPollIds: jest.fn<ReturnType<ChangeHistoryService['byPollIds']>, [string[]]>(),
-  };
-  const finishedAt = new Date('2026-08-03T09:00:00.990Z');
-  const id = '8aa43b38-bff1-469e-8cf4-cfb6738e6530';
-  const observation: PollObservation = {
-    pollId: id,
-    finishedAt,
-    outcomeKind: OutcomeKind.Complete,
-    fields: { title: 'Acme', tagline: 'CRM', description: 'Teams', price: '$29' },
-  };
+  const polls = { page: jest.fn(), byIds: jest.fn() };
+  const history = { getDecisions: jest.fn(), page: jest.fn(), changedSince: jest.fn() };
+  const ai = { getResults: jest.fn() };
+  const execution = { statuses: jest.fn() };
+  const watchlist = { list: jest.fn() };
+  const fields = { title: 'CRM', tagline: 'teams', price: '$29', description: 'fast' };
   const event = {
-    pollId: id,
-    competitorId: 'acme',
-    observedAt: new Date(finishedAt),
-    kind: ChangeKind.ContentChanged,
-    changedFields: { price: { from: '$39', to: '$29' }, tagline: { from: 'Team', to: 'CRM' } },
-    summary: null,
-    summaryStatus: SummaryStatus.Pending,
+    pollId: 'edit',
+    competitorId: 'c',
+    observedAt: new Date(0),
+    kind: 'content_changed',
+    changedFields: { price: { from: '$39', to: '$29' } },
   };
   let service: CompetitorTimelineService;
   beforeAll(async () => {
-    const nest = await Test.createTestingModule({
+    const module = await Test.createTestingModule({
       providers: [
         CompetitorTimelineService,
-        { provide: ChangeFeedRepository, useValue: {} },
         { provide: PollObservationsService, useValue: polls },
-        { provide: ChangeHistoryService, useValue: changes },
+        { provide: ChangeHistoryService, useValue: history },
+        { provide: AiSummaryService, useValue: ai },
+        { provide: WatchlistService, useValue: watchlist },
+        { provide: PollOrchestratorService, useValue: execution },
       ],
     }).compile();
-    service = nest.get(CompetitorTimelineService);
+    service = module.get(CompetitorTimelineService);
   });
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    execution.statuses.mockResolvedValue([]);
+    ai.getResults.mockResolvedValue(new Map());
+  });
+  it('batch enriches only eligible polls and distinguishes pending, unchanged and failed fetches', async () => {
+    const ids = ['edit', 'new', 'same', 'failed'];
+    polls.page.mockResolvedValue({
+      items: ids.map((pollId) => {
+        const outcomeKind = pollId === 'failed' ? 'timeout' : 'complete';
 
-  it('uses one batch, preserves poll order, and attaches changes by ID', async () => {
-    const items = [
-      observation,
-      { ...observation, pollId: 'repeated', outcomeKind: OutcomeKind.Missing, fields: null },
-      { ...observation, pollId: 'disappeared', outcomeKind: OutcomeKind.Missing, fields: null },
-      { ...observation, pollId: 'first', outcomeKind: OutcomeKind.Complete },
-    ];
-    polls.page.mockResolvedValue({ items, nextCursor: null });
-    changes.byPollIds.mockResolvedValue([
-      { ...event, pollId: 'disappeared', kind: ChangeKind.Disappeared, changedFields: {} },
-      event,
+        return { pollId, finishedAt: new Date(0), outcomeKind, fields };
+      }),
+      nextCursor: 'same',
+    });
+    history.getDecisions.mockResolvedValue([
+      { pollId: 'edit', change: event },
+      { pollId: 'same', change: null },
     ]);
-    const page = await service.page('acme', 50);
-    expect(changes.byPollIds).toHaveBeenCalledTimes(1);
-    expect(changes.byPollIds).toHaveBeenCalledWith(items.map((row) => row.pollId));
+    execution.statuses.mockResolvedValue([
+      { pollId: 'edit', changeHistoryStatus: 'error' },
+    ]);
+    ai.getResults.mockResolvedValue(
+      new Map([['edit', { status: 'ready', text: 'Lower price.' }]]),
+    );
+    const page = await service.page('c', 4);
+    expect(history.getDecisions).toHaveBeenCalledWith(ids.slice(0, 3));
+    expect(page.nextCursor).toBe('same');
     expect(page.snapshots).toMatchObject([
-      { pollId: id, changed: true, changedFields: event.changedFields, summaryStatus: 'pending' },
-      { pollId: 'repeated', changed: false, price: null, summaryStatus: 'not_applicable' },
+      { comparisonStatus: 'completed', changed: true, summary: 'Lower price.' },
+      { comparisonStatus: 'pending', summaryStatus: 'pending' },
       {
-        pollId: 'disappeared',
-        changed: true,
-        changeKind: 'disappeared',
-        changedFields: {},
-        price: null,
+        comparisonStatus: 'completed',
+        changed: false,
+        summaryStatus: 'not_applicable',
       },
-      { pollId: 'first', changed: false, changedFields: {}, summaryStatus: 'not_applicable' },
+      { comparisonStatus: 'not_applicable' },
+    ]);
+  });
+  it('retains a history-owned change through tracking and AI outages', async () => {
+    history.page.mockResolvedValue({ items: [event], nextCursor: null });
+    polls.byIds.mockRejectedValue(new Error());
+    ai.getResults.mockRejectedValue(new Error());
+    expect((await service.changePage('c', 1)).snapshots).toMatchObject([
+      {
+        pollId: 'edit',
+        changed: true,
+        changedFields: event.changedFields,
+        comparisonStatus: 'completed',
+        summaryStatus: 'unavailable',
+        observationAvailable: false,
+      },
     ]);
   });
 
-  it.each(Object.values(SummaryStatus))(
-    'returns the current %s summary for the same poll',
-    async (status) => {
-      polls.page.mockResolvedValue({ items: [observation], nextCursor: null });
-      const summary = status === SummaryStatus.Ready ? 'Price fell.' : null;
-      changes.byPollIds.mockResolvedValue([
-        { ...event, kind: ChangeKind.Returned, summaryStatus: status, summary },
-      ]);
-      expect((await service.page('acme', 1)).snapshots[0]).toMatchObject({
-        pollId: id,
-        changed: true,
-        changeKind: 'returned',
-        summary,
-        summaryStatus: status,
-      });
-    },
-  );
+  it('shows known comparison errors when history is unavailable', async () => {
+    polls.page.mockResolvedValue({
+      items: ['retrying', 'waiting'].map((pollId) => ({
+        pollId,
+        finishedAt: new Date(0),
+        outcomeKind: 'complete',
+        fields,
+      })),
+      nextCursor: null,
+    });
+    history.getDecisions.mockRejectedValue(new Error('History unavailable'));
+    execution.statuses.mockResolvedValue([
+      { pollId: 'retrying', changeHistoryStatus: 'error' },
+    ]);
 
-  it('forwards the poll ID cursor and skips the change lookup on the final empty page', async () => {
-    polls.page
-      .mockResolvedValueOnce({ items: [observation], nextCursor: id })
-      .mockResolvedValueOnce({ items: [], nextCursor: null });
-    changes.byPollIds.mockResolvedValue([]);
-    const { nextCursor } = await service.page('acme', 1);
-    expect(nextCursor).toBe(id);
-    expect(await service.page('acme', 1, nextCursor)).toEqual({ snapshots: [], nextCursor: null });
-    expect(polls.page).toHaveBeenLastCalledWith('acme', 1, id);
-    expect(changes.byPollIds).toHaveBeenCalledTimes(1);
+    const { snapshots } = await service.page('c', 2);
+    expect(snapshots).toMatchObject([
+      { pollId: 'retrying', comparisonStatus: 'error' },
+      { pollId: 'waiting', comparisonStatus: 'unavailable' },
+    ]);
   });
 
-  it('propagates a failed history lookup', async () => {
-    polls.page.mockResolvedValue({ items: [observation], nextCursor: null });
-    changes.byPollIds.mockRejectedValue(new Error('history unavailable'));
-    await expect(service.page('acme', 50)).rejects.toThrow('history unavailable');
+  it('keeps membership readable during a history outage', async () => {
+    watchlist.list.mockResolvedValue(['c']);
+    history.changedSince.mockRejectedValue(new Error());
+    expect(await service.listCompetitors()).toEqual([
+      { id: 'c', changedInLast24h: null },
+    ]);
   });
 });

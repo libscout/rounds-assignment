@@ -44,13 +44,35 @@ describe('listing source HTTP adapter', () => {
         res.writeHead(status, { 'Retry-After': '2' });
         res.end('<html>');
       };
-      expect(await client.fetchListing('a', 'p')).toEqual({ httpStatus: status, retryAfter: '2' });
+      const output = status === 404 ? undefined : '<html>';
+      expect(await client.fetchListing('a', 'p')).toEqual({
+        httpStatus: status,
+        retryAfter: '2',
+        output,
+      });
     },
   );
 
+  it('reports a 429 before its body arrives and reads at most 4096 bytes of it', async () => {
+    const preview = 'é'.repeat(2048);
+    let sendBody: () => void;
+    handler = (_req, res) => {
+      sendBody = () => res.end(preview + 'more');
+      res.writeHead(429, { 'Retry-After': '2' });
+      res.flushHeaders();
+    };
+    const onRateLimited = jest.fn(() => sendBody());
+    const response = await client.fetchListing('a', 'p', onRateLimited);
+    expect(onRateLimited).toHaveBeenCalledWith('2');
+    expect(response).toEqual({ httpStatus: 429, retryAfter: '2', output: preview });
+  });
+
   it('preserves the status when a successful response contains malformed JSON', async () => {
     handler = (_req, res) => res.end('invalid json');
-    expect(await client.fetchListing('a', 'p')).toEqual({ httpStatus: 200 });
+    expect(await client.fetchListing('a', 'p')).toEqual({
+      httpStatus: 200,
+      output: 'invalid json',
+    });
   });
 
   it('reports a connection closed before headers as a network failure', async () => {

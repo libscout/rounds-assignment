@@ -3,6 +3,7 @@ import { defineConfig } from 'drizzle-kit';
 
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE } = process.env;
 
+/** Builds the PostgreSQL connection URL for Drizzle from the configured database settings. */
 function connectionUrl(): string {
   const url = new URL('postgresql://localhost');
   url.hostname = DB_HOST;
@@ -10,12 +11,13 @@ function connectionUrl(): string {
   url.username = DB_USER;
   url.password = DB_PASSWORD;
   url.pathname = '/' + encodeURIComponent(DB_DATABASE);
+
   return url.toString();
 }
 
 export default defineConfig({
   dialect: 'postgresql',
-  schema: ['./src/modules/*/entities/*.table.ts', './src/modules/*/types/*.enum.ts'],
+  schema: './src/modules/*/entities/*.table.ts',
   out: './src/tools/db/migrations',
   ...(DB_HOST &&
     DB_USER &&

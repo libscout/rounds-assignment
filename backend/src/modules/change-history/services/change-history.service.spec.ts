@@ -1,109 +1,175 @@
-import { ListingChangeRepository } from '@src/modules/change-history/repositories/listing-change.repository';
-import { randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { randomUUIDv7 } from 'node:crypto';
+import { asc, eq } from 'drizzle-orm';
 import { DATABASE, type Database } from '@src/tools/db';
+import { listingComparisons } from '../entities';
 import { TestEnv } from '@test/nest';
-import { listingChanges } from '../entities';
-import { ChangeKind, ObservationKind, SummaryStatus, type Observation } from '../types';
+import { ChangeHistoryModule } from '../change-history.module';
+import { ChangeKind, ObservationKind, type Observation } from '../types';
 import { ChangeHistoryService } from './change-history.service';
 
 describe('ChangeHistoryService', () => {
-  let env: TestEnv, db: Database, service: ChangeHistoryService;
-  const fields = { title: 'CRM', tagline: 'CRM for teams', price: '$39/mo', description: 'A & B' };
-  function observation(overrides: Partial<Observation> = {}): Observation {
+  let env: TestEnv;
+  let history: ChangeHistoryService;
+  let db: Database;
+  const fields = {
+    title: 'CRM',
+    tagline: 'Small teams',
+    description: 'A & B',
+    price: '$39/mo',
+  };
+  beforeAll(async () => {
+    env = await TestEnv.create({ imports: [ChangeHistoryModule] });
+    history = env.nest.get(ChangeHistoryService);
+    db = env.nest.get(DATABASE);
+  }, 180000);
+  let orderedIds: string[];
+  beforeEach(async () => {
+    await db.delete(listingComparisons);
+    orderedIds = Array.from({ length: 100 }, () => randomUUIDv7()).sort();
+  });
+  afterAll(() => env?.cleanup());
+  /** Builds the next source-ordered observation for a competitor. */
+  function observation(id: string, current: Observation['current']): Observation {
     return {
-      pollId: randomUUID(),
-      competitorId: 'demo',
+      pollId: orderedIds.shift(),
+      competitorId: id,
       observedAt: new Date(),
-      current: { kind: ObservationKind.Complete, fields },
-      previousFields: fields,
-      previouslyVisible: true,
-      ...overrides,
+      current,
     };
   }
-  beforeAll(async () => {
-    env = await TestEnv.create({ providers: [ListingChangeRepository, ChangeHistoryService] });
-    db = env.nest.get(DATABASE);
-    service = env.nest.get(ChangeHistoryService);
-  }, 180000);
-  beforeEach(async () => {
-    await db.delete(listingChanges);
-  });
-  afterAll(async () => {
-    await env?.cleanup();
-  });
-
-  it('stores a replayed multi-field diff once using only its event table', async () => {
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`create schema history_only`);
-      await tx.execute(
-        sql`create table history_only.listing_changes (like public.listing_changes including all)`,
-      );
-      await tx.execute(sql`set local search_path to history_only`);
-      const isolated = new ChangeHistoryService(new ListingChangeRepository(tx));
-      const input = observation({
-        current: {
-          kind: ObservationKind.Complete,
-          fields: { ...fields, tagline: 'Team CRM', price: '$29/mo', description: 'A &amp; B' },
-        },
-      });
-      await isolated.record(input);
-      await isolated.record(input);
-      const rows = await isolated.byPollIds([input.pollId]);
-      expect(rows).toEqual([
-        {
-          pollId: input.pollId,
-          observedAt: input.observedAt,
-          competitorId: 'demo',
-          kind: ChangeKind.ContentChanged,
-          changedFields: {
-            tagline: { from: 'CRM for teams', to: 'Team CRM' },
-            price: { from: '$39/mo', to: '$29/mo' },
-          },
-          summary: null,
-          summaryStatus: SummaryStatus.Pending,
-        },
-      ]);
-      expect(await isolated.changedSince(['demo'], input.observedAt)).toEqual(new Set(['demo']));
-      expect(await isolated.changedSince(['demo'], new Date(+input.observedAt + 1))).toEqual(
-        new Set(),
-      );
+  it('owns the baseline and replays prior multi-field and unchanged decisions', async () => {
+    const id = randomUUIDv7();
+    const baseline = observation(id, { kind: ObservationKind.Complete, fields });
+    const noise = observation(id, {
+      kind: ObservationKind.Complete,
+      fields: { ...fields, description: 'A &amp;  B', price: 'USD 39.00 per month' },
     });
-  });
-  it('ignores baselines, equivalent prices and text, inconclusive outcomes and repeated absence', async () => {
-    const observations: Observation[] = [
-      observation({ previousFields: null, previouslyVisible: null }),
-      observation({ previousFields: null, previouslyVisible: false }),
-      observation({
-        current: {
-          kind: ObservationKind.Complete,
-          fields: { ...fields, price: 'USD 39.00 per month', description: 'A &amp;  B' },
-        },
-      }),
-      observation({ current: { kind: ObservationKind.Inconclusive } }),
-      observation({ current: { kind: ObservationKind.Missing }, previouslyVisible: false }),
-    ];
-    for (const input of observations) expect(await service.record(input)).toBeNull();
-    expect(await db.select().from(listingChanges)).toEqual([]);
-  });
-  it('records disappearance and return, including content changes on return', async () => {
-    expect(
-      await service.record(observation({ current: { kind: ObservationKind.Missing } })),
-    ).toEqual({
-      kind: ChangeKind.Disappeared,
-      changedFields: {},
+    const edit = observation(id, {
+      kind: ObservationKind.Complete,
+      fields: { ...fields, price: '$29/mo', tagline: 'Agencies' },
     });
-    expect(await service.record(observation({ previouslyVisible: false }))).toEqual({
+    expect((await history.record(baseline)).change).toBeNull();
+    expect((await history.record(noise)).change).toBeNull();
+    const original = await history.record(edit);
+    expect(original.change).toMatchObject({
+      kind: ChangeKind.ContentChanged,
+      changedFields: {
+        tagline: { from: 'Small teams', to: 'Agencies' },
+        price: { from: 'USD 39.00 per month', to: '$29/mo' },
+      },
+    });
+    expect(await history.record(edit)).toEqual(original);
+    expect((await history.record(noise)).change).toBeNull();
+    expect((await history.page(id, 10)).items).toEqual([original.change]);
+    expect(await history.changedSince([id], edit.observedAt)).toEqual(new Set([id]));
+    expect(await history.changedSince([id], new Date(+edit.observedAt + 1))).toEqual(
+      new Set(),
+    );
+  });
+  it('stores the state and original decision once per poll across a disappearance and replay', async () => {
+    const id = randomUUIDv7();
+    const baseline = observation(id, { kind: ObservationKind.Complete, fields });
+    const missing = observation(id, { kind: ObservationKind.Missing });
+    const stillMissing = observation(id, { kind: ObservationKind.Missing });
+    const returnedFields = { ...fields, price: '$29/mo' };
+    const returned = observation(id, {
+      kind: ObservationKind.Complete,
+      fields: returnedFields,
+    });
+    const polls = [baseline, missing, stillMissing, returned];
+    // Finish times can tie. UUIDv7 retains the poll creation order.
+    polls.forEach((p) => {
+      p.observedAt = new Date('2025-01-01T00:00:00Z');
+    });
+    for (const poll of polls) {
+      await history.record(poll);
+    }
+    const replay = await Promise.all([
+      history.record(returned),
+      history.record(returned),
+      history.record(baseline),
+    ]);
+    expect(replay[0].change).toMatchObject({
       kind: ChangeKind.Returned,
-      changedFields: {},
+      changedFields: { price: { from: fields.price, to: returnedFields.price } },
     });
+    expect(replay[1]).toEqual(replay[0]);
+    expect(replay[2].change).toBeNull();
+    const rows = await db
+      .select()
+      .from(listingComparisons)
+      .where(eq(listingComparisons.competitorId, id))
+      .orderBy(asc(listingComparisons.pollId));
+    expect(rows.map((row) => row.pollId)).toEqual(polls.map((p) => p.pollId));
+    expect(rows.map((row) => row.listingState)).toEqual([
+      fields,
+      null,
+      null,
+      returnedFields,
+    ]);
+    expect(rows.map((row) => row.diff?.kind ?? null)).toEqual([
+      null,
+      ChangeKind.Disappeared,
+      null,
+      ChangeKind.Returned,
+    ]);
+    const first = await history.page(id, 1);
+    expect(first.items.map((change) => change.pollId)).toEqual([returned.pollId]);
     expect(
-      await service.record(
-        observation({
-          previouslyVisible: false,
-          current: { kind: ObservationKind.Complete, fields: { ...fields, title: 'New' } },
-        }),
+      (await history.page(id, 1, first.nextCursor)).items.map(
+        (change) => change.pollId,
       ),
-    ).toEqual({ kind: ChangeKind.Returned, changedFields: { title: { from: 'CRM', to: 'New' } } });
+    ).toEqual([missing.pollId]);
+    await expect(history.page(id, 1, baseline.pollId)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(await history.getDecisions([stillMissing.pollId, randomUUIDv7()])).toEqual([
+      { pollId: stillMissing.pollId, change: null },
+    ]);
+    await expect(
+      history.record({ ...baseline, pollId: '00000000-0000-7000-8000-000000000001' }),
+    ).rejects.toThrow('source order');
+  });
+  it('handles simultaneous first deliveries for the same poll', async () => {
+    const first = observation(randomUUIDv7(), {
+      kind: ObservationKind.Complete,
+      fields,
+    });
+    const saved = await Promise.all([history.record(first), history.record(first)]);
+    expect(saved).toEqual([
+      { pollId: first.pollId, change: null },
+      { pollId: first.pollId, change: null },
+    ]);
+    expect(await history.changedSince([first.competitorId], new Date(0))).toEqual(
+      new Set(),
+    );
+  });
+  it('distinguishes initial, repeated and known absence and return', async () => {
+    const id = randomUUIDv7();
+    /** Creates the next confirmed absence for this competitor. */
+    const missing = () => observation(id, { kind: ObservationKind.Missing });
+    expect((await history.record(missing())).change).toBeNull();
+    expect(
+      (
+        await history.record(
+          observation(id, { kind: ObservationKind.Complete, fields }),
+        )
+      ).change,
+    ).toBeNull();
+    expect((await history.record(missing())).change?.kind).toBe(ChangeKind.Disappeared);
+    expect((await history.record(missing())).change).toBeNull();
+    expect(
+      (
+        await history.record(
+          observation(id, {
+            kind: ObservationKind.Complete,
+            fields: { ...fields, title: 'New' },
+          }),
+        )
+      ).change,
+    ).toMatchObject({
+      kind: ChangeKind.Returned,
+      changedFields: { title: { from: 'CRM', to: 'New' } },
+    });
   });
 });

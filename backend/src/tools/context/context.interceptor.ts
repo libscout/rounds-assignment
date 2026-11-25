@@ -1,5 +1,10 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
+import { randomUUIDv7 } from 'node:crypto';
 import { Observable } from 'rxjs';
 import { ContextService } from './context.service';
 import type { RequestContext } from './request-context.types';
@@ -16,7 +21,7 @@ export class ContextInterceptor implements NestInterceptor {
     const res = http.getResponse<Response>();
 
     const ctx: RequestContext = {
-      requestID: (req.headers['x-request-id'] as string) ?? randomUUID(),
+      requestID: (req.headers['x-request-id'] as string) ?? randomUUIDv7(),
       userID: req.headers['x-user-id'] as string | undefined,
     };
 
