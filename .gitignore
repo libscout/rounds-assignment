@@ -2,7 +2,10 @@
 dist/
 node_modules/
 build/
-assignment
+
+# Supplied mock services used by Compose and the API tests
+/assignment/*
+!/assignment/files/
 
 # Logs
 logs

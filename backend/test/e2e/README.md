@@ -1,6 +1,6 @@
 # Backend API E2E flow
 
-With Docker running, backend dependencies installed, and the assignment extracted under `assignment/`, run `npm --prefix backend run test:e2e` from the repository root. Each run starts Nest, a fresh PostgreSQL database, and an isolated instance of the supplied listing server on temporary ports. [Test stack](./stack.mjs)
+With Docker running and backend dependencies installed, run `npm --prefix backend run test:e2e` from the repository root. Each run starts Nest, a fresh PostgreSQL database, and isolated instances of the supplied listing and mock LLM servers on temporary ports. [Test stack](./stack.ts)
 
 Nest polls `GET /listings/:id` over HTTP. The test freezes automatic version changes with `POST /control/configure`, advances the listing with `POST /control/advance`, and reads request counts from `GET /control/stats`. Noise and formatting variations stay enabled. [Supplied server controls](../../../assignment/files/listing-source/README.md#control-endpoints)
 

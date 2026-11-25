@@ -117,4 +117,4 @@ The tests use Docker to provision an isolated PostgreSQL instance. The build cop
 
 ### End-to-end API test
 
-With Docker running, the pinned Node version active, and the assignment extracted, run `npm --prefix backend run test:e2e` from the repository root. The [test setup and full flow](./test/e2e/README.md) describe how the suite drives the supplied listing server over HTTP.
+With Docker running and the pinned Node version active, run `npm --prefix backend run test:e2e` from the repository root. The [test setup and full flow](./test/e2e/README.md) describe how the suite drives the supplied listing server over HTTP.
