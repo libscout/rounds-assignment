@@ -140,23 +140,46 @@ export class PollDispatcher implements OnApplicationBootstrap, OnModuleDestroy {
       lagMs,
       inFlight: this.running.size + 1,
     });
-    const response = await this.source.fetchListing(
-      poll.competitorId,
-      poll.id,
-      (header) => this.onRateLimitHeader(header),
+    const { result, finishedAt } = await this.observe(poll);
+    const saved = await this.persist(poll, 'poll outcome', () =>
+      this.attempts.finish(poll, result, finishedAt),
     );
-    const finishedAt = new Date();
-    const result = PollOutcomeMapper.classify(poll.competitorId, response, finishedAt);
-    this.recordOutcome(poll, result);
-    if (await this.persistOutcome(poll, result, finishedAt)) {
+    if (saved) {
       this.logger.debug('Poll finished', { ...context, outcome: result.kind });
     }
   }
 
-  /** Pauses dispatch as soon as the source sends 429 headers, before its body has finished. */
-  private onRateLimitHeader(header: string | undefined) {
-    const deadline = PollOutcomeMapper.cooldownDeadline(header, Date.now());
-    this.cooldownUntil = Math.max(this.cooldownUntil, deadline.getTime());
+  /** Saves a 429 deadline as soon as headers arrive while the source client reads the response body. */
+  private async observe(poll: ClaimedPoll) {
+    let headersAt: Date | undefined;
+    let savingCooldown: Promise<boolean> | undefined;
+    const response = await this.source.fetchListing(
+      poll.competitorId,
+      poll.id,
+      (header) => {
+        headersAt = new Date();
+        const deadline = PollOutcomeMapper.cooldownDeadline(
+          header,
+          headersAt.getTime(),
+        );
+        this.cooldownUntil = Math.max(this.cooldownUntil, deadline.getTime());
+        savingCooldown = this.persist(poll, 'source cooldown', () =>
+          this.attempts.saveCooldown(deadline),
+        );
+      },
+    );
+    const finishedAt = new Date();
+    const result = PollOutcomeMapper.classify(
+      poll.competitorId,
+      response,
+      headersAt ?? finishedAt,
+    );
+    this.recordOutcome(poll, result);
+    if (savingCooldown !== undefined) {
+      await savingCooldown;
+    }
+
+    return { result, finishedAt };
   }
 
   /** Counts one source result and extends the shared cooldown for a rate-limited reply. */
@@ -173,18 +196,18 @@ export class PollDispatcher implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /** Retries the same write after storage errors and returns false if shutdown interrupts a retry. */
-  private async persistOutcome(
+  private async persist(
     poll: ClaimedPoll,
-    result: PollResult,
-    finishedAt: Date,
+    description: string,
+    write: () => Promise<unknown>,
   ) {
     for (;;) {
       try {
-        await this.attempts.finish(poll, result, finishedAt);
+        await write();
 
         return true;
       } catch (error) {
-        this.logger.error('Could not persist poll outcome', {
+        this.logger.error(`Could not persist ${description}`, {
           pollId: poll.id,
           competitorId: poll.competitorId,
           err: error,

@@ -14,6 +14,7 @@ describe('PollDispatcher', () => {
   const attempts = {
     claim: jest.fn<Promise<ClaimedPoll>, []>(),
     recover: jest.fn<Promise<number>, []>(),
+    saveCooldown: jest.fn<Promise<Date>, [Date]>(),
     releaseUnstarted: jest.fn(),
     finish: jest.fn(),
     oldestOverdueMs: jest.fn(),
@@ -98,8 +99,10 @@ describe('PollDispatcher', () => {
       expect.any(Date),
     );
   });
-  it('pauses new requests as soon as 429 headers arrive while the body is still pending', async () => {
+  it('persists the header deadline while the 429 body is pending and reuses it for the retry', async () => {
     let sendBody: (response: ListingSourceResponse) => void;
+    const deadline = new Date(Date.now() + 200 + 3000);
+    attempts.saveCooldown.mockResolvedValue(deadline);
     fetchListing.mockImplementationOnce((_id, _pollId, onRateLimited) => {
       onRateLimited?.('3');
 
@@ -111,12 +114,20 @@ describe('PollDispatcher', () => {
     await jest.advanceTimersByTimeAsync(200);
     try {
       await jest.advanceTimersByTimeAsync(2999);
+      expect(attempts.saveCooldown).toHaveBeenCalledWith(deadline);
       expect(fetchListing).toHaveBeenCalledTimes(1);
       expect(attempts.claim).toHaveBeenCalledTimes(1);
       expect(attempts.finish).not.toHaveBeenCalled();
     } finally {
       sendBody({ httpStatus: 429, retryAfter: '3' });
     }
+    await jest.advanceTimersByTimeAsync(1);
+    expect(attempts.finish).toHaveBeenCalledWith(
+      expect.anything(),
+      { kind: OutcomeKind.RateLimited, httpStatus: 429, retryAfter: deadline },
+      new Date(deadline.getTime() - 1),
+    );
+    expect(fetchListing).toHaveBeenCalledTimes(2);
   });
   it('retries a failed persistence write with the same outcome and no second source request', async () => {
     jest.useRealTimers();

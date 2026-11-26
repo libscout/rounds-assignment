@@ -10,11 +10,11 @@ import { MAX_POLL_OUTPUT_CODE_UNITS } from '../consts/polling.const';
 
 /** Classifies listing source responses for tracking and resolves rate-limit deadlines. */
 export class PollOutcomeMapper {
-  /** Classifies a source reply at the time the request finished. */
+  /** Classifies a source reply, measuring Retry-After from receipt of the headers. */
   static classify(
     id: string,
     response: ListingSourceResponse,
-    finishedAt: Date,
+    receivedAt: Date,
   ): PollResult {
     if ('failure' in response) {
       return PollOutcomeMapper.transportFailure(response);
@@ -23,7 +23,7 @@ export class PollOutcomeMapper {
       return PollOutcomeMapper.classifyListing(id, response);
     }
 
-    return PollOutcomeMapper.classifyStatus(response, finishedAt);
+    return PollOutcomeMapper.classifyStatus(response, receivedAt);
   }
 
   /** Preserves the status and preview available when the source connection failed. */
@@ -39,7 +39,7 @@ export class PollOutcomeMapper {
   /** Maps an HTTP error to its tracking outcome, including the source cooldown on a 429. */
   private static classifyStatus(
     response: ListingSourceHttpResponse,
-    finishedAt: Date,
+    receivedAt: Date,
   ): PollResult {
     const { httpStatus, output } = response;
     if (httpStatus === 429) {
@@ -49,7 +49,7 @@ export class PollOutcomeMapper {
         httpStatus,
         retryAfter: PollOutcomeMapper.cooldownDeadline(
           response.retryAfter,
-          finishedAt.getTime(),
+          receivedAt.getTime(),
         ),
       };
     }

@@ -28,6 +28,11 @@ export class PollAttemptService {
     return until?.getTime() ?? 0;
   }
 
+  /** Persists the longest known source deadline while the rate-limited poll is still in flight. */
+  saveCooldown(deadline: Date) {
+    return this.attempts.saveCooldown(deadline);
+  }
+
   /** Returns how many milliseconds the oldest scheduled poll is overdue, or zero if none is late. */
   async oldestOverdueMs() {
     const due = await this.attempts.oldestDueAt();

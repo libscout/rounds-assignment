@@ -77,6 +77,11 @@ export class PollAttemptRepository {
     return state.cooldownUntil;
   }
 
+  /** Commits the source deadline independently of the poll that received the 429. */
+  saveCooldown(deadline: Date) {
+    return PollAttemptRepository.extendCooldown(this.db, deadline);
+  }
+
   /** Returns the earliest scheduled poll time, or null when the watchlist has none. */
   async oldestDueAt(): Promise<Date | null> {
     const [oldest] = await this.db
@@ -362,8 +367,8 @@ export class PollAttemptRepository {
   }
 
   /** Extends the shared source cooldown and returns the effective retry deadline. */
-  private static async extendCooldown(tx: DatabaseTransaction, retryAfter: Date) {
-    const [state] = await tx
+  private static async extendCooldown(db: Pick<Database, 'update'>, retryAfter: Date) {
+    const [state] = await db
       .update(sourceState)
       .set({
         cooldownUntil: sql`greatest(${sourceState.cooldownUntil},${retryAfter.toISOString()}::timestamptz)`,

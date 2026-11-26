@@ -198,6 +198,20 @@ describe('PollAttemptService', () => {
     expect(await attempts.recover()).toBe(deadline.getTime());
   });
 
+  it('recovers the longest header deadline when the process exits before the poll finishes', async () => {
+    await tracked.add('acme');
+    const poll = await attempts.claim();
+    const deadline = new Date(Date.now() + 60_000);
+    await attempts.saveCooldown(deadline);
+    await attempts.saveCooldown(new Date(deadline.getTime() - 1000));
+    expect(await db.select().from(pollLogs)).toMatchObject([
+      { pollId: poll.id, status: PollStatus.Fetching, finishedAt: null },
+    ]);
+    expect(await attempts.recover()).toBe(deadline.getTime());
+    expect(await db.select().from(pollLogs)).toMatchObject([
+      { pollId: poll.id, failedAttempts: [{ kind: OutcomeKind.Interrupted }] },
+    ]);
+  });
   it('restores the longest shared cooldown, preserves terminal work and marks abandoned work interrupted', async () => {
     for (const id of ['a', 'b', 'c']) {
       await tracked.add(id);
