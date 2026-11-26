@@ -1,6 +1,6 @@
 # CompetitorPulse
 
-[Architecture and design decisions](./docs/architecture.md)
+[Architecture and design decisions](./docs/architecture.md) · [Screenshots](./docs/screenshots.md)
 
 CompetitorPulse polls product listings, records changes to their content and availability, and asks an LLM to explain each change.
 
