@@ -1,29 +1,32 @@
 # CompetitorPulse frontend
 
-[UI](../docs/UI.md)
+## [UI screenshots](../docs/UI.md)
 
-React and TypeScript client for the competitor watchlist and poll timeline. Open `/` to manage tracked IDs or `/?competitor=acme-crm` to see its recorded changes. Select **All polls** to see every processed observation, including unchanged listings and source failures. Follow the [root startup guide](../README.md#start-everything) to run Vite alongside the API and its local dependencies.
+See the watchlist, listing changes, and poll history.
+
+## Run the full system
+
+With Docker running, run this from the repository root.
+
+```sh
+docker compose up
+```
+
+Open the [watchlist](http://localhost:5173) and add `acme-crm`. Docker starts the UI, API, database, and mocks without an `.env` file or API key.
 
 ## Local development
 
-From `frontend/`, run:
+To edit the React app with Vite, start the [backend development server](../backend/README.md#local-development). In a second terminal, run these commands from the repository root.
 
 ```sh
-nvm use
+cd frontend
+nvm install
 npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite (normally `http://localhost:5173`). Run the [Nest backend](../backend/README.md#local-development) when developing API-backed screens. In development, requests to `/api` go to `http://127.0.0.1:3000`. To use another backend, set `API_PROXY_TARGET` in `frontend/.env.local` and restart Vite. This setting belongs to the dev server.
+Open the URL Vite prints. It forwards `/api` to `http://127.0.0.1:3000` and **Advance mock listing** to the source on port `4002`. To use different addresses, set `API_PROXY_TARGET` or `MOCK_SOURCE_TARGET` in `frontend/.env.local` and restart Vite.
 
-### Development mock controls
+## Checks
 
-Click **Advance mock listing** on a competitor timeline to send its ID to `POST /control/advance`. The button reports the resulting mock version. Reopen the timeline after the next scheduled poll to see the observation. [Mock server endpoints](../assignment/files/listing-source/README.md#endpoints)
-
-The development proxy targets `http://127.0.0.1:4002` by default. Set `MOCK_SOURCE_TARGET` in `frontend/.env.local` if your local mock uses another port, and make sure Nest's `LISTING_SOURCE_URL` points to the same instance. The button is available with `npm run dev`.
-
-## Verification
-
-Run `npm run lint` for React and accessibility checks, `npm run typecheck` for strict TypeScript checks, and `npm run build` for a production build in `dist/`. Use `npm run preview` to serve the build locally. A production host must serve the static files and route `/api` to Nest.
-
-Project conventions and upstream references are in [AGENTS.md](./AGENTS.md).
+From `frontend/`, run `npm run lint` and `npm run build`. The build checks TypeScript and writes the production files to `dist/`.
