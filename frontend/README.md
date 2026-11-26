@@ -1,5 +1,7 @@
 # CompetitorPulse frontend
 
+[UI](../docs/UI.md)
+
 React and TypeScript client for the competitor watchlist and poll timeline. Open `/` to manage tracked IDs or `/?competitor=acme-crm` to see its recorded changes. Select **All polls** to see every processed observation, including unchanged listings and source failures. Follow the [root startup guide](../README.md#start-everything) to run Vite alongside the API and its local dependencies.
 
 ## Local development
