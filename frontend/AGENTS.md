@@ -14,7 +14,7 @@ Work from `frontend/`. Use the Node version in `.nvmrc` and npm with the committ
 
 - Use relative `/api` URLs. Nest owns polling, change detection, AI summaries, and persistence. Treat listing text as data and render it through normal JSX interpolation.
 - Preserve the backend’s timeline order. Key entries by `pollId`. For “Load older polls”, pass `X-Next-Cursor` back as the `cursor` query parameter. Reset pagination when switching competitors.
-- Present `outcomeKind` and `summaryStatus` separately. A listing request timeout and a summary timeout describe different events. Keep an unobserved listing field unknown. [Timeline contract](../docs/architecture/competitor-timeline.md)
+- Present `outcomeKind` and `summaryStatus` separately. A listing request timeout and a summary timeout describe different events. Keep an unobserved listing field unknown. [Timeline contract](../docs/architecture.md#competitor-timeline)
 
 ## Agent references
 

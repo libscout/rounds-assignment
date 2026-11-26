@@ -1,6 +1,8 @@
 # CompetitorPulse
 
-CompetitorPulse polls product listings, records changes to their content and availability, and asks an LLM to explain each change. The watchlist and timeline use a NestJS API backed by PostgreSQL.
+[Architecture and design decisions](./docs/architecture.md)
+
+CompetitorPulse polls product listings, records changes to their content and availability, and asks an LLM to explain each change.
 
 ## Start locally with Docker Compose
 
@@ -57,52 +59,11 @@ On the watchlist, **Reset all** clears all tracked IDs, poll history, changes an
 | `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | For another Chat Completions-compatible provider, use its base URL, model ID and optional bearer token. The client appends `/chat/completions` to the base URL. |
 | `DEMO_RESET_ENABLED` | Enables the destructive local reset control. Defaults to true in the local Compose stack and in development. |
 
-## Backend architecture
-
-The NestJS backend runs its HTTP handlers and background workers in one process. Listing Tracking, Change History, and AI Summary each own their data and operate independently. Each arrow points from the importing module to its direct dependency. [Module source](./backend/src/modules)
-
-```mermaid
----
-config:
-  class:
-    hideEmptyMembersBox: true
----
-classDiagram
-    direction LR
-    class PollOrchestratorModule["poll-orchestrator"]
-    class ListingTrackingModule["listing-tracking"]
-    class ChangeHistoryModule["change-history"]
-    class AiSummaryModule["ai-summary"]
-    class CompetitorTimelineModule["competitor-timeline"]
-
-    PollOrchestratorModule ..> ListingTrackingModule : read and acknowledge polls
-    PollOrchestratorModule ..> ChangeHistoryModule : compare observations
-    PollOrchestratorModule ..> AiSummaryModule : submit diffs and check results
-
-    ListingTrackingModule <.. CompetitorTimelineModule : read watchlist and polls
-    ChangeHistoryModule <.. CompetitorTimelineModule : read changes
-    AiSummaryModule <.. CompetitorTimelineModule : read summaries
-    PollOrchestratorModule <.. CompetitorTimelineModule : read status and errors
-```
-
-- `poll-orchestrator` coordinates work by poll ID. Every five seconds by default, it picks up complete listings and confirmed 404s, asks `change-history` to compare them, and submits recorded changes to `ai-summary`. It tracks comparison and summary progress.
-- `listing-tracking` manages watchlist additions and removals and schedules source fetches. It stores each poll's outcome and retry history, including failed fetches.
-- `change-history` compares each observation with the competitor's last known listing. It records each comparison decision and saves a diff when the listing's content or availability changes.
-- `ai-summary` turns a recorded diff into a short explanation. Its worker builds the LLM prompt, handles timeouts and retries within the daily call limit, and stores the summary or failure status under the poll ID.
-- `competitor-timeline` serves the React watchlist and timeline. It flags competitors that changed in the last 24 hours and joins observations, diffs, and summaries by poll ID. It reads the orchestrator's status to show pending comparisons and active errors.
-
-**All polls** includes failed fetches. **Changes** can show a recorded diff while its summary is pending or unavailable.
-
-## Design decisions
-
-- Listing Tracking writes one UUIDv7 log per scheduled poll. Up to three HTTP attempts share the ID. The finished row holds the observed listing fields or a confirmed 404 or failure, alongside its prior errors. Removing a competitor stops future polling and preserves its history.
-- With 6,000 competitors and five requests per second, a full sweep takes at least 20 minutes. The scheduler serves the oldest due competitor first, spaces request starts, and applies a source-wide cooldown on HTTP 429. A 15-minute sweep would require additional source capacity.
-- Change history compares title, tagline, description, price and availability. The first complete listing establishes a baseline. An initial 404 leaves the ID tracked. Disappearance and return after a known listing each produce a change. A failed or partial fetch preserves the previous baseline.
-- AI Summary builds the messages and stores each FIFO job and result in one PostgreSQL row. Each provider request allows up to 128 output tokens and reserves one of 2,000 calls per UTC day. A transient failure gets one retry. If quota runs out, the diff remains available with a `budget_exhausted` summary status.
-- History is retained indefinitely for the assessment, covering the 90-day requirement. The local deployment uses a single source scheduler. A separate message broker, automated retention and cloud deployment are outside this implementation.
-- OpenAI Codex assisted with planning, implementation and tests. During design review, the project author replaced a separate AI job table and result acknowledgment with a single durable result row keyed by poll ID.
-
 For API details and test commands, see the [backend guide](./backend/README.md).
+
+## AI assistance
+
+I designed the architecture and used OpenAI Codex for planning, implementation, and tests. I revised the database schema Codex suggested to use fewer tables and keep the database layer simpler.
 
 ## Code formatting
 
